@@ -40,5 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   targets for the local network (`192.168.1.1`, `192.168.1.2`,
   `192.168.0.1`, and the `10.10.10.10–50` infra range), grouped by
   subnet via labels.
+- `grafana/dashboards/icmp-probes.json`: provisioned dashboard "ICMP
+  Probes" (uid `pitale-icmp-probes`) — UP/DOWN counters, state-timeline
+  per target, RTT per target and a current-status table, with
+  `instance`/`subnet` template variables.
+
+### Changed
+- Grafana datasource provisioning now sets explicit UIDs
+  (`pitale-prometheus`, `pitale-loki`, `pitale-alertmanager`) so
+  committed dashboards can reference them deterministically.
 
 [Unreleased]: https://github.com/daffi1238/pi-tale/compare/HEAD...HEAD
