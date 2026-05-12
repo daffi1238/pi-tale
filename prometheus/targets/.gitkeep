@@ -1,0 +1,2 @@
+# Drop file-based service discovery YAML into this directory.
+# See blackbox-*-example.yml for the expected format.

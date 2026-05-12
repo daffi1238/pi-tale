@@ -1,0 +1,79 @@
+# Baseline alert rules for the pi-tale host itself.
+#
+# These rules are deliberately conservative: they fire on conditions that
+# almost always mean someone needs to look, not on every transient blip.
+# Tune the thresholds for your environment.
+
+groups:
+
+  - name: pi-tale-host
+    interval: 1m
+    rules:
+
+      - alert: HostHighCpu
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU on {{ $labels.instance }}"
+          description: "CPU usage above 90% for 15 minutes (value: {{ $value | printf \"%.1f\" }}%)."
+
+      - alert: HostLowMemory
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low available memory on {{ $labels.instance }}"
+          description: "Less than 10% memory available for 10 minutes."
+
+      - alert: HostDiskFillingUp
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}) * 100 < 10
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk almost full on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+          description: "Less than 10% free space on {{ $labels.mountpoint }}."
+
+      - alert: HostTemperatureHigh
+        # Raspberry Pi throttles at ~80°C; alert earlier so we can act.
+        expr: node_hwmon_temp_celsius > 75
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pi running hot ({{ $value }}°C)"
+          description: "Sustained high SoC temperature. Check cooling, airflow and ambient temperature."
+
+      - alert: NodeExporterDown
+        expr: up{job="node_exporter"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "node_exporter unreachable"
+          description: "We have lost host visibility. Check the container."
+
+  - name: pi-tale-probes
+    interval: 1m
+    rules:
+
+      - alert: ProbeFailing
+        expr: probe_success == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Probe {{ $labels.instance }} is failing"
+          description: "Blackbox probe ({{ $labels.job }}) has been failing for 5 minutes."
+
+      - alert: ProbeSlow
+        expr: probe_duration_seconds > 2
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Probe {{ $labels.instance }} is slow"
+          description: "Probe took more than 2s on average over the last 10 minutes."

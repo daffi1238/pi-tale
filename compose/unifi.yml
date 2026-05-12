@@ -1,0 +1,17 @@
+# pi-tale — UniFi layer (stub).
+#
+# Will add:
+#   - linuxserver/unifi-network-application (or jacobalberty/unifi)
+#   - golift/unifi-poller scraping the controller and exposing /metrics
+#
+# Stack with core:
+#   docker compose -f compose/core.yml -f compose/unifi.yml --env-file compose/.env up -d
+
+name: pi-tale-unifi
+
+networks:
+  pitale:
+    name: pitale
+    external: true
+
+services: {}

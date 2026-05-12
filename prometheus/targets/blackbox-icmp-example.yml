@@ -1,0 +1,20 @@
+# Example blackbox ICMP targets — duplicate this file as
+# `blackbox-icmp-<your-site>.yml` and replace the addresses with your own.
+#
+# Each entry under `targets` is an IP or hostname Prometheus should ping
+# via the blackbox_exporter. Labels propagate to the resulting series.
+
+- targets:
+    - 1.1.1.1
+    - 8.8.8.8
+  labels:
+    kind: extranet
+    role: dns
+
+# - targets:
+#     - 192.168.1.1   # your gateway
+#     - 192.168.1.10  # a switch
+#     - 192.168.1.20  # an AP
+#   labels:
+#     kind: intranet
+#     role: infra

@@ -1,0 +1,17 @@
+# pi-tale — probes layer (stub).
+#
+# Will add:
+#   - prom/snmp-exporter for SNMP devices (switches, UPS, ...)
+#   - pi-tale-wifi-exporter (Python) for RF visibility via iw scan
+#
+# Stack with core:
+#   docker compose -f compose/core.yml -f compose/probes.yml --env-file compose/.env up -d
+
+name: pi-tale-probes
+
+networks:
+  pitale:
+    name: pitale
+    external: true
+
+services: {}

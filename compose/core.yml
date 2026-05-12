@@ -1,0 +1,204 @@
+# pi-tale — core observability stack.
+#
+# What you get:
+#   - Prometheus       :9090   metrics database
+#   - Alertmanager     :9093   alert routing (Telegram + SMTP receivers,
+#                              both disabled until you fill .env)
+#   - Grafana          :3000   dashboards
+#   - Loki             :3100   log storage
+#   - Promtail         :9080   log shipper (host syslog + container logs)
+#   - node_exporter    :9100   host metrics (CPU, RAM, disk, temp, ...)
+#   - blackbox_exporter:9115   ICMP/HTTP/TCP probes for "is X alive?"
+#   - cAdvisor         :8081   per-container metrics
+#
+# Conventions:
+#   - All persistent data goes to ../data/<service>.
+#     For real deployments that path is a symlink (or bind) to /mnt/datos.
+#   - Image tags are pinned. Never use :latest here.
+#   - Every image listed below ships an official arm64 build.
+#
+# Usage (from repo root):
+#   docker compose -f compose/core.yml --env-file compose/.env up -d
+
+name: pi-tale-core
+
+networks:
+  pitale:
+    name: pitale
+    driver: bridge
+
+services:
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: pitale-prometheus
+    hostname: prometheus
+    restart: unless-stopped
+    user: "65534:65534"  # nobody:nogroup
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-10GB}
+      - --web.enable-lifecycle
+      - --web.external-url=http://localhost:${PROMETHEUS_PORT:-9090}/
+      - --web.listen-address=:9090
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus/rules:/etc/prometheus/rules:ro
+      - ../prometheus/targets:/etc/prometheus/targets:ro
+      - ../data/prometheus:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks: [pitale]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: pitale-alertmanager
+    hostname: alertmanager
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.external-url=http://localhost:${ALERTMANAGER_PORT:-9093}/
+    volumes:
+      - ../alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ../data/alertmanager:/alertmanager
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    networks: [pitale]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9093/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: pitale-grafana
+    hostname: grafana
+    restart: unless-stopped
+    user: "472:472"  # grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required, set it in compose/.env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_LOG_LEVEL: ${GRAFANA_LOG_LEVEL:-warn}
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ../data/grafana:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks: [pitale]
+    depends_on:
+      - prometheus
+      - loki
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: pitale-loki
+    hostname: loki
+    restart: unless-stopped
+    user: "10001:10001"  # loki
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ../loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ../data/loki:/loki
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    networks: [pitale]
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    container_name: pitale-promtail
+    hostname: promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ../promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - ../data/promtail:/var/lib/promtail
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    networks: [pitale]
+    depends_on:
+      - loki
+
+  node_exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: pitale-node-exporter
+    hostname: node-exporter
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|var/lib/docker/.+)($$|/)
+      - --collector.netclass.ignored-devices=^(veth.*|docker.*|br-.*|lo)$$
+      - --collector.netdev.device-exclude=^(veth.*|docker.*|br-.*|lo)$$
+      - --collector.hwmon
+      - --collector.thermal_zone
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+    networks: [pitale]
+    # node_exporter is reached on the docker network at port 9100 by
+    # Prometheus; we do not publish it on the host by default.
+
+  blackbox_exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: pitale-blackbox-exporter
+    hostname: blackbox
+    restart: unless-stopped
+    # ICMP probes need raw sockets:
+    cap_add:
+      - NET_RAW
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+    volumes:
+      - ../blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    networks: [pitale]
+    # Internal only — Prometheus calls it; do not expose to LAN.
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: pitale-cadvisor
+    hostname: cadvisor
+    restart: unless-stopped
+    privileged: true     # required on Pi to read cgroups properly
+    devices:
+      - /dev/kmsg
+    command:
+      - --housekeeping_interval=30s
+      - --docker_only=true
+      - --store_container_labels=false
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      - /etc/machine-id:/etc/machine-id:ro
+    ports:
+      - "${CADVISOR_PORT:-8081}:8080"
+    networks: [pitale]

@@ -1,0 +1,2 @@
+# Drop dashboard JSON files here. Grafana picks them up automatically
+# thanks to ../provisioning/dashboards/dashboards.yml.

@@ -1,0 +1,17 @@
+# pi-tale — extras layer (stub).
+#
+# Will add:
+#   - louislam/uptime-kuma     :3001   friendly "is it up?" board
+#   - (optional) homarr / dozzle / ntfy
+#
+# Stack with core:
+#   docker compose -f compose/core.yml -f compose/extras.yml --env-file compose/.env up -d
+
+name: pi-tale-extras
+
+networks:
+  pitale:
+    name: pitale
+    external: true
+
+services: {}

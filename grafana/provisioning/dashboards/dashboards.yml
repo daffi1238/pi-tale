@@ -1,0 +1,16 @@
+# Grafana dashboard provisioning.
+# Any JSON dashboard placed under ../dashboards is picked up automatically.
+
+apiVersion: 1
+
+providers:
+  - name: pi-tale
+    orgId: 1
+    folder: pi-tale
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 60
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: true

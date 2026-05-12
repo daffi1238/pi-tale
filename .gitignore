@@ -1,0 +1,53 @@
+# --- pi-tale ignores -------------------------------------------------------
+
+# Runtime data — Prometheus TSDB, Grafana, Loki, container state, etc.
+# In real deployments this lives on /mnt/datos; the local ./data is the
+# fallback used by compose for dev/CI and we never want it in git.
+/data/
+/mnt/
+
+# Secrets and per-host config
+compose/.env
+compose/.env.local
+*.env.local
+.env
+.env.local
+
+# --- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+pip-wheel-metadata/
+
+# --- Docker / Compose ------------------------------------------------------
+docker-compose.override.yml
+*.log
+
+# --- Editors / OS ----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Backups / build artifacts --------------------------------------------
+*.bak
+*.tmp
+*.orig
+backup/
+backups/
+dist/
+build/

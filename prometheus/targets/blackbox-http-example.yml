@@ -1,0 +1,14 @@
+# Example blackbox HTTP targets — duplicate as
+# `blackbox-http-<your-site>.yml` and put your own URLs in here.
+
+- targets:
+    - https://www.cloudflare.com
+    - https://duckduckgo.com
+  labels:
+    kind: extranet
+
+# - targets:
+#     - http://192.168.1.50:8000/health
+#   labels:
+#     kind: intranet
+#     role: app
