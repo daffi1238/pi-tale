@@ -1,0 +1,24 @@
+# pi-tale — ICMP liveness probes for the local network.
+#
+# Picked up automatically by Prometheus via file_sd
+# (see prometheus.yml -> job_name: blackbox_icmp).
+# Edit / extend this file freely — no Prometheus reload needed
+# beyond the 1m refresh_interval.
+
+- targets:
+    - 192.168.1.1
+    - 192.168.1.2
+    - 192.168.0.1
+  labels:
+    kind: intranet
+    subnet: "192.168"
+
+- targets:
+    - 10.10.10.10
+    - 10.10.10.20
+    - 10.10.10.30
+    - 10.10.10.40
+    - 10.10.10.50
+  labels:
+    kind: intranet
+    subnet: "10.10.10"

@@ -36,5 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `compose/.env.example` carries `UPTIME_KUMA_PORT` and a placeholder
   for the future `UPTIME_KUMA_API_KEY` (Prometheus integration not
   wired yet).
+- `prometheus/targets/blackbox-icmp-lan.yml`: first real ICMP liveness
+  targets for the local network (`192.168.1.1`, `192.168.1.2`,
+  `192.168.0.1`, and the `10.10.10.10–50` infra range), grouped by
+  subnet via labels.
 
 [Unreleased]: https://github.com/daffi1238/pi-tale/compare/HEAD...HEAD
