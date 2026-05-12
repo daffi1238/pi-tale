@@ -1,11 +1,14 @@
-# pi-tale — extras layer (stub).
+# pi-tale — extras layer.
 #
-# Will add:
-#   - louislam/uptime-kuma     :3001   friendly "is it up?" board
-#   - (optional) homarr / dozzle / ntfy
-#
-# Stack with core:
+# Optional operator-friendly services. Stack on top of core:
 #   docker compose -f compose/core.yml -f compose/extras.yml --env-file compose/.env up -d
+#
+# Currently shipped:
+#   - Uptime Kuma     :3001   friendly UI to manage ping/HTTP/TCP checks.
+#                             Independent from Prometheus/Alertmanager —
+#                             see docs/targets/uptime-kuma.md.
+#
+# Planned (not implemented yet): homarr / dozzle / ntfy.
 
 name: pi-tale-extras
 
@@ -14,4 +17,22 @@ networks:
     name: pitale
     external: true
 
-services: {}
+services:
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23.16-debian
+    container_name: pitale-uptime-kuma
+    hostname: uptime-kuma
+    restart: unless-stopped
+    # The debian variant is the one with reliable ARM64 builds for Pi.
+    volumes:
+      - ../data/uptime-kuma:/app/data
+    ports:
+      - "${UPTIME_KUMA_PORT:-3001}:3001"
+    networks: [pitale]
+    healthcheck:
+      test: ["CMD", "node", "/app/extra/healthcheck"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 90s

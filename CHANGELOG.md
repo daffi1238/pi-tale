@@ -26,5 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `system-tune.sh`, `docker-setup.sh`.
 - Initial `docs/architecture.md`, `docs/installation.md`,
   `docs/hardware.md` and per-target stubs.
+- `compose/extras.yml` now ships **Uptime Kuma**
+  (`louislam/uptime-kuma:1.23.16-debian`) on port 3001 — friendly UI to
+  add ping / HTTP / TCP / DNS monitors and manage their notifications
+  without editing YAML. Independent from Prometheus/Alertmanager (see
+  `docs/targets/uptime-kuma.md` for the tradeoffs).
+- `bootstrap/install.sh` now prepares `data/uptime-kuma/` so enabling
+  the extras layer needs no extra setup.
+- `compose/.env.example` carries `UPTIME_KUMA_PORT` and a placeholder
+  for the future `UPTIME_KUMA_API_KEY` (Prometheus integration not
+  wired yet).
 
 [Unreleased]: https://github.com/daffi1238/pi-tale/compare/HEAD...HEAD

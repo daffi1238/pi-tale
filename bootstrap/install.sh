@@ -140,12 +140,16 @@ fi
 section "Preparing data directories"
 
 # (path, uid, gid)  — uids match the user each container drops to.
+# uptime-kuma lives in extras.yml but we prepare its directory up-front;
+# the empty dir costs nothing and saves a re-run when the operator
+# enables extras later.
 declare -a DATA_DIRS=(
   "prometheus|65534|65534"
   "alertmanager|65534|65534"
   "grafana|472|472"
   "loki|10001|10001"
   "promtail|0|0"
+  "uptime-kuma|0|0"
 )
 
 mkdir -p "${DATA_ROOT}"

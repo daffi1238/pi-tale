@@ -141,6 +141,25 @@ A deeper write-up lives in [`docs/architecture.md`](docs/architecture.md).
 Adding UniFi metrics, SNMP devices and WiFi RF sondas is done by enabling
 the corresponding compose layer; see the docs.
 
+## Optional: Uptime Kuma UI
+
+If you (or whoever else has to look at this dashboard) want a friendlier
+way to add monitors and tweak notifications without editing YAML, enable
+the **extras** layer:
+
+```bash
+docker compose \
+  -f compose/core.yml \
+  -f compose/extras.yml \
+  --env-file compose/.env up -d
+```
+
+Then open `http://<pi-ip>:3001` and create the admin user on first
+visit. Kuma manages its own checks (ping, HTTP, TCP, DNS, …) and its
+own notifications independently of Prometheus/Alertmanager — see
+[`docs/targets/uptime-kuma.md`](docs/targets/uptime-kuma.md) for when
+to use which.
+
 ## Hardware
 
 See [`docs/hardware.md`](docs/hardware.md) for the recommended bill of
