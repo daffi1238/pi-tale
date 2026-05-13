@@ -45,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per target, RTT per target and a current-status table, with
   `instance`/`subnet` template variables.
 
+- `bootstrap/wifi-driver-setup.sh`: idempotent installer for the
+  Realtek RTL8812AU USB WiFi driver (chipset `0bda:8812`, e.g. Alfa
+  AWUS036ACH). Builds the out-of-tree `morrownr/8812au-20210820`
+  source via DKMS (pinned to commit `dabcb74`, the last revision that
+  compiles on kernel 6.12 — later commits reference an undefined
+  `_FW_UNDER_SURVEY` symbol). Re-runs cleanly: it removes stale DKMS
+  registrations and legacy source dirs before retrying.
+
 ### Changed
 - Grafana datasource provisioning now sets explicit UIDs
   (`pitale-prometheus`, `pitale-loki`, `pitale-alertmanager`) so
