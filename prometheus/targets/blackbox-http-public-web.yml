@@ -1,0 +1,48 @@
+# Public-facing websites we operate. Scraped by the blackbox_http job.
+# Each group below routes to a specific blackbox module via the `module`
+# label (see prometheus.yml — `regex: (.+)` rewrites it to __param_module
+# only when present, so the generic http_2xx fallback still applies to
+# any target without a module label).
+#
+# Useful metrics that fall out of this for free:
+#
+#   probe_success                       — 1 if 2xx AND body matches the
+#                                         module's regex (when defined)
+#   probe_http_status_code              — final status code
+#   probe_http_duration_seconds{phase}  — resolve / connect / tls /
+#                                         processing / transfer
+#   probe_ssl_earliest_cert_expiry      — Unix timestamp of cert expiry;
+#                                         alert when (it - time()) < 14d
+#   probe_http_redirects                — redirect hops followed
+#   probe_failed_due_to_regex           — 1 when the body did not match
+#                                         (separate from generic failure)
+#
+# To add another title-checked site:
+#   1. Define a `http_2xx_title_<name>` module in blackbox/blackbox.yml
+#      with a `fail_if_body_not_matches_regexp` entry.
+#   2. Add a group below with `module: http_2xx_title_<name>`.
+
+# Catches "server up, TLS valid, body says 'Hostal Campo Nuevo' in title".
+- targets:
+    - https://hostalcamponuevo.es
+  labels:
+    kind: extranet
+    owner: self
+    module: http_2xx_title_hostalcamponuevo
+
+# Same idea — title must start with "DevSec".
+- targets:
+    - https://devsec.es
+  labels:
+    kind: extranet
+    owner: self
+    module: http_2xx_title_devsec
+
+# Next.js SPA, but the initial HTML payload still carries
+# `<title>TwinTongues</title>` — so we can also assert the title here.
+- targets:
+    - https://www.twin-tongues.com
+  labels:
+    kind: extranet
+    owner: self
+    module: http_2xx_title_twin_tongues

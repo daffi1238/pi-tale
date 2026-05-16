@@ -1,0 +1,112 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Pin the same versions as compose/core.yml so what we validate in CI
+# matches what runs on the Pi.
+env:
+  PROMETHEUS_IMAGE: prom/prometheus:v2.55.1
+  ALERTMANAGER_IMAGE: prom/alertmanager:v0.27.0
+  SHELLCHECK_IMAGE: koalaman/shellcheck:stable
+
+jobs:
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint bootstrap and scripts
+        run: |
+          shopt -s nullglob
+          targets=( bootstrap/*.sh scripts/*.sh )
+          if [[ ${#targets[@]} -eq 0 ]]; then
+            echo "No shell scripts found, skipping."
+            exit 0
+          fi
+          # -e SC1091: sourcing system files like /etc/os-release is fine
+          # and shellcheck cannot follow them from a sandboxed checkout.
+          docker run --rm \
+            -v "${{ github.workspace }}:/work" \
+            -w /work \
+            "${SHELLCHECK_IMAGE}" \
+            -e SC1091 \
+            "${targets[@]}"
+
+  prometheus:
+    name: promtool
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The prometheus.yml mounted by compose lives at
+      # /etc/prometheus/prometheus.yml and references rules/targets via
+      # absolute paths under /etc/prometheus. We replicate that layout
+      # so promtool resolves the file_sd and rule_files globs the same
+      # way it would in the running container.
+      - name: promtool check config
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}/prometheus:/etc/prometheus:ro" \
+            --entrypoint promtool \
+            "${PROMETHEUS_IMAGE}" \
+            check config /etc/prometheus/prometheus.yml
+      - name: promtool check rules
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}/prometheus/rules:/rules:ro" \
+            --entrypoint sh \
+            "${PROMETHEUS_IMAGE}" \
+            -c 'for f in /rules/*.yml; do echo "--- $f"; promtool check rules "$f" || exit 1; done'
+
+  alertmanager:
+    name: amtool
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: amtool check-config
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}/alertmanager:/etc/alertmanager:ro" \
+            --entrypoint amtool \
+            "${ALERTMANAGER_IMAGE}" \
+            check-config /etc/alertmanager/alertmanager.yml
+
+  compose:
+    name: docker compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # GRAFANA_ADMIN_PASSWORD is marked required in core.yml. Compose
+      # would refuse to render the file with the variable empty.
+      - name: Prepare compose/.env
+        run: |
+          cp compose/.env.example compose/.env
+          sed -i 's/^GRAFANA_ADMIN_PASSWORD=.*/GRAFANA_ADMIN_PASSWORD=ci-placeholder/' compose/.env
+      - name: Validate each compose project standalone
+        run: |
+          set -e
+          for f in compose/core.yml compose/probes.yml compose/extras.yml compose/unifi.yml; do
+            echo "--- ${f}"
+            docker compose -f "${f}" --env-file compose/.env config -q
+          done
+      - name: Validate documented stacked invocations
+        run: |
+          set -e
+          # Combinations advertised in README.md / docs.
+          declare -a STACKS=(
+            "compose/core.yml compose/extras.yml"
+            "compose/core.yml compose/unifi.yml"
+          )
+          for stack in "${STACKS[@]}"; do
+            echo "--- ${stack}"
+            # shellcheck disable=SC2086
+            docker compose $(printf -- '-f %s ' ${stack}) --env-file compose/.env config -q
+          done

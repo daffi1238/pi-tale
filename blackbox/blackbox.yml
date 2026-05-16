@@ -26,6 +26,61 @@ modules:
       tls_config:
         insecure_skip_verify: false
 
+  # Per-site variants of http_2xx that ALSO assert a body regex. Used to
+  # catch "the server is up and TLS is happy, but the WAF / hosting panel
+  # is serving us an error page" — a 200 OK with the wrong body still
+  # makes probe_success=0 when the regex doesn't match.
+  #
+  # Convention: name them `http_2xx_title_<shortname>`. Keep one regex per
+  # module; blackbox accepts a list but the failure is silent on which
+  # one matched, so one-per-module gives clearer signal.
+
+  http_2xx_title_hostalcamponuevo:
+    prober: http
+    timeout: 10s                       # site is on the slow side (~4s)
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: []
+      follow_redirects: true
+      fail_if_not_ssl: true            # we want HTTPS or nothing
+      fail_if_body_not_matches_regexp:
+        - '<title>Hostal Campo Nuevo'
+      tls_config:
+        insecure_skip_verify: false
+
+  http_2xx_title_devsec:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: []
+      follow_redirects: true
+      fail_if_not_ssl: true
+      fail_if_body_not_matches_regexp:
+        - '<title>DevSec'
+      tls_config:
+        insecure_skip_verify: false
+
+  http_2xx_title_twin_tongues:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      preferred_ip_protocol: ip4
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: []
+      follow_redirects: true
+      fail_if_not_ssl: true
+      # Next.js app, but the title ships in the initial HTML payload.
+      fail_if_body_not_matches_regexp:
+        - '<title>TwinTongues</title>'
+      tls_config:
+        insecure_skip_verify: false
+
   http_post_2xx:
     prober: http
     timeout: 5s

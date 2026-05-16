@@ -84,6 +84,10 @@ scrape_configs:
 
   - job_name: blackbox_http
     metrics_path: /probe
+    # Default module if a target file does not override it via a `module`
+    # label. Per-target overrides are picked up by the relabel rule
+    # below, allowing site-specific modules (e.g. with a title regex) to
+    # coexist with the generic http_2xx liveness check.
     params:
       module: [http_2xx]
     file_sd_configs:
@@ -95,8 +99,31 @@ scrape_configs:
         target_label: __param_target
       - source_labels: [__param_target]
         target_label: instance
+      # If the target file carries a `module` label, route the probe
+      # through that module. The `regex: (.+)` guard keeps the default
+      # in place when the label is absent or empty.
+      - source_labels: [module]
+        regex: (.+)
+        target_label: __param_module
       - target_label: __address__
         replacement: blackbox_exporter:9115
+
+  # --- WiFi RF probe (compose/probes.yml) ---------------------------------
+  #
+  # The wifi_exporter container runs with `network_mode: host`, so its
+  # listener is bound on the host's loopback at WIFI_LISTEN_PORT (9116 by
+  # default). Prometheus reaches it via `host.docker.internal`, which is
+  # mapped to `host-gateway` in compose/core.yml.
+  #
+  # The exporter is optional — if you do not stack probes.yml, this scrape
+  # will fail with connection refused and the job will be DOWN. That is
+  # fine; remove it (or guard with --enable-feature=…) if it bothers you.
+
+  - job_name: wifi_exporter
+    static_configs:
+      - targets: ["host.docker.internal:9116"]
+        labels:
+          host: pi-tale-node
 
   - job_name: blackbox_tcp
     metrics_path: /probe

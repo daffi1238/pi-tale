@@ -1,0 +1,473 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Per-BSSID RF view from the wifi_exporter (exporters/wifi). Tracks signal, channel, and encryption of every SSID matched by WIFI_SSID_PATTERNS. To see ALL nearby networks for channel-congestion analysis, temporarily set WIFI_SSID_PATTERNS= (empty) in compose/.env and restart the exporter.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Tracked SSIDs",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+          "expr": "count(count by(ssid) (pitale_wifi_bss_signal_dbm)) OR vector(0)",
+          "instant": true,
+          "legendFormat": "SSIDs"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Matched BSSIDs",
+      "description": "Number of BSSIDs that matched WIFI_SSID_PATTERNS in the last scan (i.e. how many series the exporter is publishing).",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+          "expr": "pitale_wifi_scan_matched_count",
+          "instant": true,
+          "legendFormat": "Matched"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "BSSIDs in air",
+      "description": "Total BSSIDs seen by the radio in the last scan, before WIFI_SSID_PATTERNS filtering.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+          "expr": "pitale_wifi_scan_bss_count",
+          "instant": true,
+          "legendFormat": "All"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Last scan age",
+      "description": "Seconds since the exporter completed a scan successfully. Should stay near WIFI_SCAN_INTERVAL (default 30s); a value much larger means the driver hung or the adapter dropped.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+          "expr": "time() - pitale_wifi_scan_last_success_timestamp_seconds",
+          "instant": true,
+          "legendFormat": "age"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 90 },
+              { "color": "red", "value": 300 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Signal per BSSID",
+      "description": "Per-BSSID signal level in dBm (closer to 0 = stronger). dBm is logarithmic — a 3 dB drop is half the power.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+          "expr": "pitale_wifi_bss_signal_dbm{ssid=~\"$ssid\", band=~\"$band\"}",
+          "legendFormat": "{{ssid}} · {{band}} ch{{channel}} ({{bssid}})"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max", "min", "lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dBm",
+          "decimals": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never",
+            "axisPlacement": "auto"
+          },
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": -80 },
+              { "color": "yellow", "value": -70 },
+              { "color": "green", "value": -60 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Scan health",
+      "description": "Did the last scan run? Did it find anything? scan_duration is wall-clock time of the iw scan call; sudden spikes usually mean DFS dwell on a 5GHz channel. scan_errors_total increments when iw exits non-zero or times out.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+      "targets": [
+        {
+          "refId": "DUR",
+          "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+          "expr": "pitale_wifi_scan_duration_seconds",
+          "legendFormat": "scan duration (s)"
+        },
+        {
+          "refId": "ALL",
+          "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+          "expr": "pitale_wifi_scan_bss_count",
+          "legendFormat": "BSSIDs in air"
+        },
+        {
+          "refId": "MATCH",
+          "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+          "expr": "pitale_wifi_scan_matched_count",
+          "legendFormat": "matched"
+        },
+        {
+          "refId": "ERR",
+          "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+          "expr": "rate(pitale_wifi_scan_errors_total[5m])",
+          "legendFormat": "errors/s (5m)"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 4,
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "color": { "mode": "palette-classic" },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "scan duration (s)" },
+            "properties": [{ "id": "unit", "value": "s" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "errors/s (5m)" },
+            "properties": [
+              { "id": "unit", "value": "cps" },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Current snapshot",
+      "description": "Latest sample per BSSID. Use the Band/SSID filters at the top to scope down.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+      "targets": [
+        {
+          "refId": "SIG",
+          "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+          "expr": "pitale_wifi_bss_signal_dbm{ssid=~\"$ssid\", band=~\"$band\"}",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        },
+        {
+          "refId": "SEEN",
+          "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+          "expr": "pitale_wifi_bss_last_seen_seconds{ssid=~\"$ssid\", band=~\"$band\"}",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        },
+        {
+          "refId": "ENC",
+          "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+          "expr": "pitale_wifi_bss_encryption_info{ssid=~\"$ssid\", band=~\"$band\"} == 1",
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "host": true,
+              "Value #ENC": true
+            },
+            "indexByName": {
+              "ssid": 0,
+              "bssid": 1,
+              "band": 2,
+              "channel": 3,
+              "Value #SIG": 4,
+              "encryption": 5,
+              "Value #SEEN": 6
+            },
+            "renameByName": {
+              "ssid": "SSID",
+              "bssid": "BSSID",
+              "band": "Band",
+              "channel": "Ch",
+              "encryption": "Enc",
+              "Value #SIG": "Signal",
+              "Value #SEEN": "Last seen"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [{ "field": "Signal", "desc": true }]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto" },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Signal" },
+            "properties": [
+              { "id": "unit", "value": "dBm" },
+              { "id": "decimals", "value": 1 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "orange", "value": -80 },
+                    { "color": "yellow", "value": -70 },
+                    { "color": "green", "value": -60 }
+                  ]
+                }
+              },
+              { "id": "custom.width", "value": 110 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Last seen" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "decimals", "value": 1 },
+              { "id": "custom.width", "value": 90 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Ch" },
+            "properties": [{ "id": "custom.width", "value": 60 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Band" },
+            "properties": [{ "id": "custom.width", "value": 75 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Enc" },
+            "properties": [{ "id": "custom.width", "value": 90 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "BSSID" },
+            "properties": [{ "id": "custom.width", "value": 150 }]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": { "show": false, "reducer": ["sum"], "fields": "" }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["pi-tale", "wifi", "rf", "network"],
+  "templating": {
+    "list": [
+      {
+        "name": "ssid",
+        "label": "SSID",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+        "definition": "label_values(pitale_wifi_bss_signal_dbm, ssid)",
+        "query": { "query": "label_values(pitale_wifi_bss_signal_dbm, ssid)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "options": [],
+        "hide": 0
+      },
+      {
+        "name": "band",
+        "label": "Band",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "pitale-prometheus" },
+        "definition": "label_values(pitale_wifi_bss_signal_dbm, band)",
+        "query": { "query": "label_values(pitale_wifi_bss_signal_dbm, band)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "options": [],
+        "hide": 0
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "WiFi Probe",
+  "uid": "pitale-wifi-probe",
+  "version": 1,
+  "weekStart": ""
+}

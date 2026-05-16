@@ -51,6 +51,12 @@ services:
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
     networks: [pitale]
+    # Allow Prometheus to reach exporters that run with `network_mode: host`
+    # (e.g. wifi_exporter in compose/probes.yml). `host-gateway` resolves
+    # to the docker0 gateway from inside the container — i.e. the host
+    # itself — without hardcoding 172.17.0.1.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9090/-/healthy"]
       interval: 30s

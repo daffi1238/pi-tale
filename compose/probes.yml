@@ -1,17 +1,55 @@
-# pi-tale — probes layer (stub).
+# pi-tale — probes layer.
 #
-# Will add:
-#   - prom/snmp-exporter for SNMP devices (switches, UPS, ...)
-#   - pi-tale-wifi-exporter (Python) for RF visibility via iw scan
+# Optional exporters that sit alongside the core stack. Right now this is
+# just the WiFi RF probe; SNMP / unifi-poller will land here too.
 #
-# Stack with core:
-#   docker compose -f compose/core.yml -f compose/probes.yml --env-file compose/.env up -d
+# This is a SEPARATE compose project from core (same pattern as
+# extras.yml). Bring it up next to the core stack with:
+#
+#   docker compose -f compose/probes.yml --env-file compose/.env up -d
+#
+# Prometheus reaches the exporter through host.docker.internal:9116 — the
+# matching `extra_hosts: host-gateway` mapping lives in compose/core.yml.
+#
+# The WiFi exporter needs the host's wlan interface, which only exists
+# in the host network namespace — hence `network_mode: host` and the
+# matching NET_ADMIN/NET_RAW capabilities.
 
 name: pi-tale-probes
 
-networks:
-  pitale:
-    name: pitale
-    external: true
+# No network block: services using `network_mode: host` cannot also join a
+# user-defined bridge. If you add a probe that should join the core
+# `pitale` network instead, declare it here as `external: true` (see
+# extras.yml for the pattern).
 
-services: {}
+services:
+
+  wifi_exporter:
+    build:
+      context: ../exporters/wifi
+    image: pi-tale/wifi-exporter:0.1.0
+    container_name: pitale-wifi-exporter
+    hostname: pitale-wifi-exporter
+    restart: unless-stopped
+    # Host networking is required: the kernel exposes wlan netdevs only in
+    # the host network namespace. As a side effect, the listener at
+    # ${WIFI_LISTEN_PORT:-9116} ends up bound on the host directly — make
+    # sure no other service uses that port.
+    network_mode: host
+    cap_add:
+      - NET_ADMIN   # ip link set <iface> up, trigger scan
+      - NET_RAW     # kernel-level scan socket
+    environment:
+      WIFI_IFACE: ${WIFI_IFACE:-wlan1}
+      WIFI_SCAN_INTERVAL: ${WIFI_SCAN_INTERVAL:-30}
+      WIFI_SCAN_TIMEOUT: ${WIFI_SCAN_TIMEOUT:-20}
+      WIFI_SSID_PATTERNS: ${WIFI_SSID_PATTERNS:-MOVISTAR-WIFI6-C738*,vodafone317B*}
+      # Bind on 0.0.0.0 so Prometheus (in the pitale bridge network) can
+      # reach the exporter via host.docker.internal:WIFI_LISTEN_PORT. The
+      # metrics endpoint then also responds on the host's LAN IP — block it
+      # at the firewall if your Pi is exposed to untrusted networks.
+      WIFI_LISTEN_HOST: 0.0.0.0
+      WIFI_LISTEN_PORT: ${WIFI_LISTEN_PORT:-9116}
+      WIFI_HASH_SSID: ${WIFI_HASH_SSID:-0}
+    # No volumes: the exporter is stateless. Logs go to stdout and are
+    # picked up by Promtail through the standard docker socket mount.

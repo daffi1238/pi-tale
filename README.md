@@ -12,6 +12,7 @@
 <p align="center">
   <a href="#status"><img src="https://img.shields.io/badge/status-early%20development-orange" alt="status"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="license"/></a>
+  <a href="https://github.com/daffi1238/pi-tale/actions/workflows/ci.yml"><img src="https://github.com/daffi1238/pi-tale/actions/workflows/ci.yml/badge.svg?branch=main" alt="ci"/></a>
   <img src="https://img.shields.io/badge/arch-arm64-success" alt="arch"/>
   <img src="https://img.shields.io/badge/runs%20on-Raspberry%20Pi%204%2F5-c51a4a" alt="runs on Pi"/>
 </p>
@@ -159,6 +160,29 @@ visit. Kuma manages its own checks (ping, HTTP, TCP, DNS, …) and its
 own notifications independently of Prometheus/Alertmanager — see
 [`docs/targets/uptime-kuma.md`](docs/targets/uptime-kuma.md) for when
 to use which.
+
+## Backup and restore
+
+The bind-mounted `data/` directory holds everything that matters across
+reboots: Prometheus TSDB, Loki chunks, Grafana SQLite, Alertmanager
+silences. `scripts/backup.sh` packages it all into a date-stamped
+tarball with rotation; `scripts/restore.sh` puts a tarball back in
+place. Both stop and restart only the compose projects that are
+actually running.
+
+```bash
+# Default: stop running stacks, tar ./data, restart, keep the 7 newest
+sudo scripts/backup.sh
+
+# Save somewhere off the Pi (recommended once you have a USB or NAS mount)
+sudo BACKUP_DIR=/mnt/usb/pi-tale-backups scripts/backup.sh
+
+# Restore a specific archive (moves the current ./data aside first)
+sudo scripts/restore.sh backup/pi-tale-backup-20260516-1200Z.tar.gz
+```
+
+See `scripts/backup.sh --help` for `--live`, `--include-env` and
+`--dest` flags.
 
 ## Hardware
 
