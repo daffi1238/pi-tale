@@ -49,7 +49,7 @@ wireguard_args := -f $(WIREGUARD_FILE) --env-file $(ENV_FILE)
 .PHONY: help up probes extras unifi wireguard all down restart ps logs \
         pull build config validate \
         reload-prometheus reload-alertmanager reload-blackbox \
-        telegram-setup wireguard-status wireguard-down \
+        telegram-setup secrets-setup wireguard-status wireguard-down \
         backup restore
 
 # ----- discoverability -----
@@ -149,6 +149,13 @@ reload-blackbox: ## SIGHUP blackbox_exporter so it re-reads blackbox.yml
 # alertmanager's uid (65534) per bootstrap/install.sh.
 telegram-setup: ## install the Telegram bot token (sudo; reads compose/.env or TOKEN=...)
 	@sudo scripts/telegram-setup.sh $(TOKEN)
+
+# Reads GRAFANA_ADMIN_PASSWORD (required) and SMTP_PASSWORD (optional)
+# from compose/.env and writes them to data/<service>/secrets/<file>,
+# so Grafana and Alertmanager pick them up via their native `*_FILE` /
+# `*_password_file` directives instead of in plain env / YAML.
+secrets-setup: ## install Grafana admin + SMTP password secret files (sudo; reads compose/.env)
+	@sudo scripts/secrets-setup.sh
 
 wireguard-status: ## inspect the tunnel from inside the gateway container
 	@docker exec pitale-wireguard-gateway wg show wg0 \

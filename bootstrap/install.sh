@@ -166,10 +166,11 @@ for entry in "${DATA_DIRS[@]}"; do
   chmod 0750 "${d}"
 done
 
-# Alertmanager's `bot_token_file` and rendered config live here. We
-# make both directories owned by alertmanager's uid so
-# `scripts/telegram-setup.sh` (run via sudo) can write into them and the
-# container reads them without further chown gymnastics.
+# Alertmanager's `bot_token_file`, SMTP `auth_password_file` and rendered
+# config live here. We make all three directories owned by alertmanager's
+# uid so `scripts/telegram-setup.sh` and `scripts/secrets-setup.sh` (both
+# run via sudo) can write into them and the container reads them without
+# further chown gymnastics.
 for sub in secrets runtime; do
   d="${DATA_ROOT}/alertmanager/${sub}"
   if [[ ! -d "${d}" ]]; then
@@ -179,6 +180,18 @@ for sub in secrets runtime; do
   chown 65534:65534 "${d}"
   chmod 0750 "${d}"
 done
+
+# Grafana admin password is read by Grafana at startup from
+# /etc/grafana/secrets/admin_password (bind-mounted from here). The file
+# is written by `sudo make secrets-setup`, which reads
+# GRAFANA_ADMIN_PASSWORD from compose/.env. Owned by uid 472 (grafana).
+d="${DATA_ROOT}/grafana/secrets"
+if [[ ! -d "${d}" ]]; then
+  mkdir -p "${d}"
+  info "Created ${d}"
+fi
+chown 472:472 "${d}"
+chmod 0750 "${d}"
 
 # WireGuard gateway: user-managed wg0.conf lives directly under
 # data/wireguard/. Owned by root because the gateway container runs as

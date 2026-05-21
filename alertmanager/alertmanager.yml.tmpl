@@ -24,10 +24,16 @@
 global:
   resolve_timeout: 5m
   # Used by the SMTP receiver when you enable it.
+  #
+  # The password lives outside this committed YAML: write it to
+  # data/alertmanager/secrets/smtp_password via `sudo make secrets-setup`
+  # (reads SMTP_PASSWORD from compose/.env). Alertmanager v0.27+ reads
+  # the file via `smtp_auth_password_file` so the secret never enters
+  # the rendered config.
   # smtp_smarthost: 'smtp.example.com:587'
   # smtp_from: 'pi-tale@example.com'
   # smtp_auth_username: 'pi-tale@example.com'
-  # smtp_auth_password: 'CHANGE_ME'
+  # smtp_auth_password_file: /etc/alertmanager/secrets/smtp_password
   # smtp_require_tls: true
 
 route:

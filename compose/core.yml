@@ -114,7 +114,14 @@ services:
     user: "472:472"  # grafana
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required, set it in compose/.env}
+      # `__FILE` (double underscore + FILE) is Grafana's native pattern:
+      # it reads the file content as the password at startup. The file
+      # is written by `sudo make secrets-setup` (scripts/secrets-setup.sh)
+      # from GRAFANA_ADMIN_PASSWORD in compose/.env. Rotating the
+      # password: edit .env, re-run `secrets-setup`, then
+      # `docker compose -f compose/core.yml restart grafana` (Grafana
+      # only reads `__FILE` on startup).
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /etc/grafana/secrets/admin_password
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
@@ -124,6 +131,8 @@ services:
       - ../grafana/provisioning:/etc/grafana/provisioning:ro
       - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
       - ../data/grafana:/var/lib/grafana
+      # Secrets dir written by scripts/secrets-setup.sh — see env block.
+      - ../data/grafana/secrets:/etc/grafana/secrets:ro
     ports:
       - "${BIND_HOST:-0.0.0.0}:${GRAFANA_PORT:-3000}:3000"
     networks: [pitale]
