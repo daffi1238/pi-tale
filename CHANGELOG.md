@@ -7,7 +7,146 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **WireGuard moved from the host to a dedicated container** for blast
+  radius isolation. With the previous host-mode tunnel a compromised
+  VPS could reach any service the Pi exposed on `0.0.0.0` (sshd,
+  Grafana, Prometheus UI, ...) via `10.50.0.1`. With the gateway
+  container, only the gateway is reachable at that address, and only
+  the two narrow forwarding paths it advertises are open: outbound
+  Prometheus → VPS exporters on tcp/{9100,9080,9113,9187}, inbound
+  VPS Promtail → Loki on tcp/3100. Everything else is silently dropped.
+  - `wireguard/` (new): `Dockerfile`, `entrypoint.sh`, `wg0.conf.tmpl`.
+    The entrypoint resolves Loki via Docker DNS at startup, brings up
+    wg0 via `wg-quick`, and installs the two DNAT + MASQUERADE paths
+    using kernel iptables.
+  - `compose/wireguard.yml` (new): separate compose project
+    `pi-tale-wireguard`. Hosts `wireguard_gateway` (NET_ADMIN,
+    `/dev/net/tun`, sysctl `ip_forward=1`) and `wireguard_exporter`
+    sharing the gateway's netns (`network_mode:
+    service:wireguard_gateway`) so it can see wg0. Healthcheck: wg0
+    handshake within the last 5 min.
+  - `bootstrap/wireguard-setup.sh` rewritten. No longer touches
+    `/etc/wireguard/` on the host. Keys live in
+    `data/wireguard/keys/` and the rendered `wg0.conf.in` in
+    `data/wireguard/runtime/` (both gitignored, 0600 root). Refuses
+    to run if `wg-quick@wg0` is still enabled on the host (would
+    dual-bind UDP/51820). Phase 2 also (re)starts the gateway
+    container and verifies the handshake from inside it.
+  - `compose/probes.yml`: `wireguard_exporter` removed (moved to
+    `compose/wireguard.yml`).
+  - `prometheus/prometheus.yml`: `wireguard_exporter` target moves
+    from `host.docker.internal:9586` to `wireguard_gateway:9586`.
+  - `prometheus/targets/vps-*-main.yml`: targets change from
+    `10.50.0.2:<port>` to `wireguard_gateway:<port>`. Prometheus
+    scrapes the gateway; the gateway DNATs to the VPS.
+  - `Makefile`: new `wireguard`, `wireguard-down`. `wireguard-status`
+    now `docker exec`s into the gateway (no host wg required).
+  - `bootstrap/install.sh`: pre-creates `data/wireguard/{keys,runtime}`
+    with root ownership.
+
 ### Added
+- **Defense-in-depth port binding** via the new `BIND_HOST` env var.
+  All UIs/exporter ports published on the host (Grafana, Prometheus,
+  Alertmanager, Loki, cAdvisor, Uptime Kuma) now bind on
+  `${BIND_HOST:-0.0.0.0}`. Operators on untrusted LANs can set
+  `BIND_HOST=127.0.0.1` and access the UIs only through SSH tunnels
+  (`ssh -L 3000:localhost:3000 pi`). Documented in `compose/.env.example`.
+
+- **VPS monitoring over a WireGuard overlay.** End-to-end skeleton for
+  scraping a remote VPS from the Pi without exposing any exporter to
+  the public internet.
+  - `bootstrap/wireguard-setup.sh`: idempotent two-phase setup. Phase 1
+    generates the Pi's keypair, writes a partial `wg0.conf`, and prints
+    the snippet to run on the VPS (which installs WG, generates its
+    own keypair, registers the Pi as a peer, opens UDP/51820, and
+    prints its public key). Phase 2 (after `VPS_WG_PUBKEY` is set in
+    `compose/.env`) finalises the peer block and verifies the
+    handshake. Sub-30s end-to-end on a happy path.
+  - `exporters/wireguard/`: first-party Python exporter (matches the
+    wifi_exporter pattern). Reads `wg show all dump` on a 30s interval
+    and exposes `wireguard_latest_handshake_seconds`,
+    `wireguard_sent_bytes_total`, `wireguard_received_bytes_total`,
+    `wireguard_peers_count` and friends on `:9586/metrics`. Same
+    metric names as the (now-removed) upstream image so committed
+    rules and dashboards keep working.
+  - `compose/probes.yml`: new `wireguard_exporter` service with
+    `network_mode: host` and `cap_add: [NET_ADMIN]`. Builds locally
+    (no Docker Hub dependency).
+  - `prometheus/prometheus.yml`: five new scrape jobs —
+    `wireguard_exporter` (host.docker.internal:9586) plus
+    `vps_node`, `vps_cadvisor`, `vps_nginx`, `vps_postgres` via
+    `file_sd` over `prometheus/targets/vps-*-*.yml`.
+  - `prometheus/targets/vps-{node,cadvisor,nginx,postgres}-main.yml`:
+    starter target files pointing at `10.50.0.2:<port>` with
+    `host=vps` label.
+  - `prometheus/rules/vps.yml`: 12 alerts across host, containers,
+    nginx, postgres and the tunnel itself. `WireguardTunnelDown`
+    (no handshake in 5m), `VpsNodeDown`, `VpsDiskFillingUp`,
+    `PostgresDown`, `VpsContainerOOMKilled` etc. — the critical ones
+    route to Telegram automatically (existing route by `severity`).
+  - `grafana/dashboards/wireguard.json`: tunnel state, handshake
+    freshness, tx/rx throughput (6 panels).
+  - `grafana/dashboards/vps-host.json`: stats row + CPU by mode,
+    memory, network throughput, per-mountpoint FS usage (9 panels).
+    Template var `host` so multiple VPSes are a relabeling away.
+  - `compose/.env.example`: new `VPS_PUBLIC_IP`, `VPS_WG_PUBKEY`,
+    `WG_PORT`, `WG_PI_IP`, `WG_VPS_IP`, `WG_NETWORK`,
+    `WIREGUARD_LISTEN_PORT`.
+  - `Makefile`: `wireguard-setup`, `wireguard-status`.
+  - `examples/vps-monitoring/`: ready-to-deploy compose project for
+    the VPS side — `node_exporter`, `cAdvisor`, `nginx_exporter`
+    (with the matching `stub_status` snippet), `postgres_exporter`,
+    `promtail` pushing logs to Loki on the Pi over WG. All exporter
+    listeners bind on the WG overlay only. `README.md` walks
+    through each step including the `pg_monitor` SQL.
+- **Telegram alerts wired end-to-end.** Alertmanager now ships an
+  active `telegram` receiver and the route `severity=critical → telegram`
+  (repeat 1h). Both per-install values (`TELEGRAM_BOT_TOKEN` and
+  `TELEGRAM_CHAT_ID`) live in `compose/.env`; nothing personal ever
+  enters a committed file.
+- `alertmanager/alertmanager.yml.tmpl` (committed) is the source of
+  truth for alertmanager config. The runtime file lives in
+  `data/alertmanager/runtime/alertmanager.yml` (gitignored) and is
+  rendered from the template by `make telegram-setup`, substituting
+  the `__TELEGRAM_CHAT_ID__` placeholder. The bot token is written
+  in parallel to `data/alertmanager/secrets/telegram_bot_token` and
+  loaded by alertmanager via its native `bot_token_file` directive.
+- `scripts/telegram-setup.sh`: idempotent installer. Reads
+  `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from `compose/.env`
+  (or accepts both as positional arguments), validates shapes
+  (token = `<digits>:<base64-ish>`, chat id = non-zero integer with
+  optional leading `-`), writes both files DIRECTLY (preserving inode
+  so Docker's single-file bind mount keeps tracking the same content)
+  with 0600 / 0640 perms owned by uid 65534, and POSTs `/-/reload`
+  to alertmanager. Requires root because the target directories
+  belong to the alertmanager uid.
+- `Makefile`: `make telegram-setup [TOKEN=...]` wraps the script via
+  `sudo`; `make reload-alertmanager` POSTs `/-/reload` (same shape as
+  `reload-prometheus`).
+- `bootstrap/install.sh`: pre-creates `data/alertmanager/secrets/`
+  with the right ownership so a fresh install doesn't need a manual
+  step before `make telegram-setup`.
+- `compose/core.yml`: Alertmanager mounts
+  `../data/alertmanager/secrets:/etc/alertmanager/secrets:ro`.
+- `prometheus/rules/observability.yml`: 6 new rules covering the
+  failure modes the existing `host.yml` did not. **Critical**
+  (Telegram-routed): `ContainerOOMKilled`. **Warning** (visible in
+  AM UI, silent unless you change the route): `BlackboxCertExpiringSoon`
+  (< 14 days, guarded against `probe_ssl_earliest_cert_expiry == 0`),
+  `HTTPBodyRegexMismatch` (the per-site `http_2xx_title_*` regex
+  stopped matching), `ContainerRestartLoop` (>3 restarts in 15m),
+  `WifiExporterStale` (no successful scan in 5m), `WifiExporterDown`
+  (the exporter container itself is unreachable).
+- `Makefile` at the repo root with operational shortcuts: `make up`,
+  `make probes`, `make extras`, `make unifi`, `make all`, `make down`,
+  `make restart`, `make ps`, `make logs [SERVICE=x]`, `make pull`,
+  `make build`, `make config`, `make reload-prometheus`,
+  `make reload-blackbox`, `make backup [FLAGS=...]`,
+  `make restore ARCHIVE=...`. Self-documenting (`make help` lists
+  every target with its tagline). Each target drives ONE compose
+  project to match how the YAMLs are written (each file has its own
+  `name:` — stacking with `-f` collides on container names).
 - `scripts/backup.sh`: working implementation. Stops the running
   pi-tale compose projects (`pi-tale-core`, `pi-tale-probes`,
   `pi-tale-extras`) to take a self-consistent snapshot, then tars
@@ -133,5 +272,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Grafana datasource provisioning now sets explicit UIDs
   (`pitale-prometheus`, `pitale-loki`, `pitale-alertmanager`) so
   committed dashboards can reference them deterministically.
+- `README.md`, `compose/extras.yml`, `compose/unifi.yml`: replaced
+  the "stack with `-f core.yml -f extras.yml`" examples with the
+  separate-project pattern (`make extras` / `make unifi` etc.).
+  Stacking was advertised in earlier comments but never actually
+  worked because each compose file declares its own `name:` and
+  merging them caused container-name collisions on the second stack.
+  Deep-link docs (`docs/installation.md`, `docs/troubleshooting.md`,
+  `docs/architecture.md`, `docs/targets/uptime-kuma.md`) still use
+  raw compose commands and will be updated incrementally.
 
 [Unreleased]: https://github.com/daffi1238/pi-tale/compare/HEAD...HEAD

@@ -72,22 +72,27 @@ sudo bootstrap/install.sh
 nano compose/.env
 
 # 5. Bring up the core stack
-docker compose -f compose/core.yml --env-file compose/.env up -d
+make up
 
 # 6. Open Grafana
 #    http://<pi-ip>:3000   (default user: admin, password: from .env)
 ```
 
-Adding the UniFi controller, WiFi probes or extra services is done by
-stacking compose files:
+Additional layers are independent compose projects — bring them up
+**alongside** core (not stacked with `-f`, each one has its own
+project name):
 
 ```bash
-docker compose \
-  -f compose/core.yml \
-  -f compose/unifi.yml \
-  -f compose/probes.yml \
-  --env-file compose/.env up -d
+make probes    # WiFi RF exporter
+make extras    # Uptime Kuma
+make unifi     # UniFi controller + poller (stub for now)
+make all       # core + probes + extras in one go
 ```
+
+`make help` lists every target (`up`, `down`, `ps`, `logs SERVICE=x`,
+`pull`, `build`, `backup`, `restore ARCHIVE=...`, ...). The raw
+`docker compose` invocations behind each target are documented in
+[`Makefile`](Makefile) if you prefer to run them by hand.
 
 Full installation walkthrough: [`docs/installation.md`](docs/installation.md).
 
@@ -149,10 +154,7 @@ way to add monitors and tweak notifications without editing YAML, enable
 the **extras** layer:
 
 ```bash
-docker compose \
-  -f compose/core.yml \
-  -f compose/extras.yml \
-  --env-file compose/.env up -d
+make extras
 ```
 
 Then open `http://<pi-ip>:3001` and create the admin user on first
