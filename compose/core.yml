@@ -26,6 +26,19 @@ networks:
   pitale:
     name: pitale
     driver: bridge
+    # Static IPAM so the bridge gateway IP is stable across daemon
+    # restarts. Used by `compose/probes.yml` to bind the host-mode
+    # wifi_exporter to this specific bridge interface (instead of
+    # 0.0.0.0), so the exporter listener is invisible from the LAN
+    # but Prometheus in the bridge can still reach it via
+    # host.docker.internal:9116 (extra_hosts below).
+    #
+    # If 172.31.0.0/24 collides with something on your network,
+    # change it AND `WIFI_LISTEN_HOST` in `compose/.env`.
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+          gateway: 172.31.0.1
 
 services:
 
@@ -200,7 +213,21 @@ services:
     container_name: pitale-cadvisor
     hostname: cadvisor
     restart: unless-stopped
-    privileged: true     # required on Pi to read cgroups properly
+    # Replaces `privileged: true` with the minimum capabilities cAdvisor
+    # actually needs on Raspberry Pi OS bookworm (cgroupsv2, no AppArmor
+    # enforcement by default). `privileged` grants ALL caps and lifts
+    # seccomp/AppArmor — these three are enough to read cgroups
+    # (SYS_ADMIN), inspect other containers' /proc namespaces
+    # (SYS_PTRACE) and traverse /var/lib/docker (DAC_READ_SEARCH).
+    # /dev/kmsg is still passed explicitly below.
+    #
+    # If you see partial metrics after switching, file an issue with
+    # the specific gauge that is missing; the historical alternative is
+    # to add back `privileged: true` only on that host.
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+      - DAC_READ_SEARCH
     devices:
       - /dev/kmsg
     command:

@@ -32,10 +32,14 @@ services:
     container_name: pitale-wifi-exporter
     hostname: pitale-wifi-exporter
     restart: unless-stopped
-    # Host networking is required: the kernel exposes wlan netdevs only in
-    # the host network namespace. As a side effect, the listener at
-    # ${WIFI_LISTEN_PORT:-9116} ends up bound on the host directly — make
-    # sure no other service uses that port.
+    # Host networking is required: the kernel exposes wlan netdevs only
+    # in the host network namespace. To avoid the listener also being
+    # reachable from the LAN, the exporter binds on the pitale bridge
+    # gateway IP (172.31.0.1 by default — see the `ipam` block in
+    # compose/core.yml) instead of 0.0.0.0. The metrics endpoint is
+    # then only reachable from the docker bridge — Prometheus inside
+    # the bridge resolves `host.docker.internal` to the same address
+    # thanks to the `extra_hosts: host-gateway` mapping in core.yml.
     network_mode: host
     cap_add:
       - NET_ADMIN   # ip link set <iface> up, trigger scan
@@ -45,11 +49,9 @@ services:
       WIFI_SCAN_INTERVAL: ${WIFI_SCAN_INTERVAL:-30}
       WIFI_SCAN_TIMEOUT: ${WIFI_SCAN_TIMEOUT:-20}
       WIFI_SSID_PATTERNS: ${WIFI_SSID_PATTERNS:-MOVISTAR-WIFI6-C738*,vodafone317B*}
-      # Bind on 0.0.0.0 so Prometheus (in the pitale bridge network) can
-      # reach the exporter via host.docker.internal:WIFI_LISTEN_PORT. The
-      # metrics endpoint then also responds on the host's LAN IP — block it
-      # at the firewall if your Pi is exposed to untrusted networks.
-      WIFI_LISTEN_HOST: 0.0.0.0
+      # Bind on the pitale bridge gateway, not 0.0.0.0. Override only
+      # if you change the bridge subnet in core.yml.
+      WIFI_LISTEN_HOST: ${WIFI_LISTEN_HOST:-172.31.0.1}
       WIFI_LISTEN_PORT: ${WIFI_LISTEN_PORT:-9116}
       WIFI_HASH_SSID: ${WIFI_HASH_SSID:-0}
     # No volumes: the exporter is stateless. Logs go to stdout and are
