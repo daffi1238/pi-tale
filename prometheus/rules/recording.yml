@@ -1,0 +1,50 @@
+# Recording rules pre-aggregate expensive expressions so dashboards
+# can read them cheaply. The Pi struggles with `quantile_over_time`
+# and large `avg by ()` rollups on every panel refresh; computing
+# them once per scrape interval here cuts query CPU dramatically.
+#
+# Naming convention: `<level>:<metric>:<operation>_<window>`
+# (Prometheus best-practice — see prometheus.io/docs/practices/rules).
+# `<level>` is the group of labels we aggregate by; the metric name is
+# preserved so dashboards stay readable.
+
+groups:
+
+  - name: pi-tale-recording-probes
+    # `interval` defaults to global evaluation_interval (15s). The probe
+    # series themselves are scraped every 15s too, so a 30s evaluation
+    # is plenty and halves the CPU cost.
+    interval: 30s
+    rules:
+
+      # p99 over the last 5 min, per probe. The blackbox `phase` label
+      # is preserved so the same recording covers `rtt`, `resolve`,
+      # `connect` etc. without duplicating rules.
+      - record: instance_phase:probe_icmp_duration_seconds:p99_5m
+        expr: quantile_over_time(0.99, probe_icmp_duration_seconds[5m])
+
+      - record: instance:probe_duration_seconds:p99_5m
+        expr: quantile_over_time(0.99, probe_duration_seconds[5m])
+
+      # Per-target uptime ratio (fraction of successful probes in the
+      # last 1h). Useful for "weekly availability" panels — querying
+      # `avg_over_time(probe_success[7d])` raw is a CPU bomb.
+      - record: instance:probe_success:ratio_1h
+        expr: avg_over_time(probe_success[1h])
+
+  - name: pi-tale-recording-wifi
+    interval: 30s
+    rules:
+
+      # Average signal per BSSID over 5 min. "Top talkers" dashboards
+      # sort `topk(N, ...)` by this; doing the avg once instead of
+      # once-per-panel-render is the point.
+      - record: bssid_ssid:pitale_wifi_bss_signal_dbm:avg5m
+        expr: avg_over_time(pitale_wifi_bss_signal_dbm[5m])
+
+      # Best (closest-to-zero, since dBm is negative) signal seen per
+      # SSID across all of its BSSIDs. Lets a dashboard show "which
+      # network has the strongest AP visible right now" without an
+      # ad-hoc max-by() in every panel.
+      - record: ssid:pitale_wifi_bss_signal_dbm:max5m
+        expr: max by (ssid) (avg_over_time(pitale_wifi_bss_signal_dbm[5m]))

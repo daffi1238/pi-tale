@@ -70,6 +70,41 @@ groups:
           summary: "Container {{ $labels.name }} is restarting in a loop"
           description: "{{ $value | printf \"%.0f\" }} restarts in the last 15 minutes."
 
+  - name: pi-tale-stack
+    interval: 1m
+    rules:
+
+      # `prometheus_tsdb_compactions_failed_total` counts head-block /
+      # block-level compaction failures. A non-zero increase means
+      # corruption, ENOSPC or a permissions bug — once it starts failing
+      # it does not self-heal, so a single event in the last hour is
+      # enough signal. The TSDB will keep accepting writes for a while
+      # but eventually wedges.
+      - alert: PrometheusTSDBCompactionFailing
+        expr: increase(prometheus_tsdb_compactions_failed_total[1h]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus TSDB compaction is failing"
+          description: "{{ $value | printf \"%.0f\" }} compaction failure(s) in the last hour. Check `docker logs pitale-prometheus`, disk space and permissions on /prometheus."
+
+      # Loki returns 5xx on the push API when its ingester rejects logs
+      # (rate-limit, ENOSPC, schema mismatch, replication-factor issues).
+      # The `route` label takes the Loki form `loki_api_v1_push`. Filter
+      # by status_code so a healthy 2xx-only stream doesn't trigger.
+      - alert: LokiIngestionErrors
+        expr: |
+          sum by (job, route) (
+            rate(loki_request_duration_seconds_count{job="loki", route=~".*push.*", status_code=~"5.."}[5m])
+          ) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Loki is rejecting log pushes"
+          description: "{{ $value | printf \"%.2f\" }} 5xx/s on {{ $labels.route }} over the last 5 minutes. Promtail / VPS push will drop entries until this clears. `docker logs pitale-loki`."
+
   - name: pi-tale-wifi
     interval: 1m
     rules:
