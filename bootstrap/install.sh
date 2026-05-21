@@ -193,6 +193,20 @@ fi
 chown 472:472 "${d}"
 chmod 0750 "${d}"
 
+# Caddy (compose/tls.yml) persists its ACME certs + state here. Owned
+# by root because the official caddy image runs as root by default.
+# Two sub-dirs match the volume layout: /data (certs, OCSP staples)
+# and /config (autosave.json, used to render the working config back).
+for sub in data config; do
+  d="${DATA_ROOT}/caddy/${sub}"
+  if [[ ! -d "${d}" ]]; then
+    mkdir -p "${d}"
+    info "Created ${d}"
+  fi
+  chown 0:0 "${d}"
+  chmod 0750 "${d}"
+done
+
 # WireGuard gateway: user-managed wg0.conf lives directly under
 # data/wireguard/. Owned by root because the gateway container runs as
 # root inside its netns (NET_ADMIN requires it) and the file holds the

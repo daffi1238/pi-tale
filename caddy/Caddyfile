@@ -1,0 +1,77 @@
+# pi-tale — Caddy in front of Grafana.
+#
+# Caddy is the optional TLS terminator. When `compose/tls.yml` is up,
+# this file is rendered into the container with envsubst-style env vars
+# (Caddy's own `{$VAR}` placeholders, NOT shell substitution).
+#
+# Three deployment modes, all driven by `TLS_HOSTNAME` in compose/.env:
+#
+#   1. Real public hostname (e.g. monitor.example.com):
+#      Caddy auto-issues a Let's Encrypt cert via HTTP-01 on :80.
+#      Requires port 80 reachable from the public internet AND a DNS
+#      A/AAAA record pointing at your IP. Set TLS_EMAIL too so renewal
+#      failures notify you.
+#
+#   2. LAN hostname with `.local` or any non-public name:
+#      Caddy falls back to its internal CA (Caddy Local Authority).
+#      Browsers will warn until you import Caddy's root cert from
+#      data/caddy/data/caddy/pki/authorities/local/root.crt. Useful for
+#      "no third-party CA round-trips" on an air-gapped LAN.
+#
+#   3. IP address as the host:
+#      Same as mode 2; Caddy issues an internal cert that includes the
+#      IP in SAN. Suitable for `https://192.168.1.x:443`.
+#
+# The reverse_proxy upstream is `grafana:3000` — Caddy joins the
+# external `pitale` network (defined in compose/core.yml) and resolves
+# the service via Docker DNS. Grafana itself stays bound on
+# ${BIND_HOST}:3000 for direct HTTP access; set BIND_HOST=127.0.0.1 in
+# compose/.env if you want HTTPS via Caddy to be the only path in.
+
+{
+	# ACME contact address (Let's Encrypt). Honoured only in mode 1.
+	email {$TLS_EMAIL:admin@example.com}
+	# Increase if you're running behind a reverse proxy and seeing
+	# malformed-header complaints.
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+{$TLS_HOSTNAME:localhost} {
+	# Default to TLS even when the hostname looks public — Caddy
+	# automatically picks ACME vs internal CA per the rules above.
+	tls {$TLS_EMAIL:internal}
+
+	# Grafana has its own auth, so we just proxy and let it do the
+	# right thing. `header_up` lets Grafana build absolute URLs that
+	# point back at the public name instead of the upstream `grafana:3000`.
+	reverse_proxy grafana:3000 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host {host}
+	}
+
+	# Block the metrics + admin endpoints from the public side. Internal
+	# scraping still works because Prometheus reaches Grafana at
+	# `grafana:3000/metrics` directly on the pitale bridge, not via Caddy.
+	@blocked {
+		path /metrics /metrics/* /api/admin/* /admin/* /debug/* /debug
+	}
+	respond @blocked 404
+
+	# Standard hardening headers. HSTS is committed to 30d initially;
+	# bump to 6mo + preload once you're confident in the cert pipeline.
+	header {
+		Strict-Transport-Security "max-age=2592000; includeSubDomains"
+		X-Content-Type-Options    "nosniff"
+		Referrer-Policy           "strict-origin-when-cross-origin"
+		# Grafana sets X-Frame-Options itself; let it through.
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+		level  INFO
+	}
+}

@@ -1,0 +1,63 @@
+# pi-tale — TLS terminator (optional).
+#
+# Adds a Caddy reverse proxy in front of Grafana that auto-issues TLS
+# certs (Let's Encrypt if `TLS_HOSTNAME` is a real domain reachable on
+# :80; Caddy's internal CA otherwise — useful for LAN-only setups).
+#
+# This is a SEPARATE compose project. Bring it up alongside core:
+#
+#   make tls            # docker compose -f compose/tls.yml up -d
+#
+# Grafana itself keeps publishing on ${BIND_HOST}:3000 — Caddy adds an
+# extra HTTPS route, it does not replace the plain-HTTP one. To make
+# Caddy the only ingress, set BIND_HOST=127.0.0.1 in compose/.env so
+# port 3000 is loopback-only.
+#
+# Caddy joins the existing `pitale` bridge (declared in compose/core.yml)
+# as `external: true`, and reaches Grafana via Docker DNS at
+# `grafana:3000`. Persistent ACME storage lives under data/caddy/.
+
+name: pi-tale-tls
+
+networks:
+  pitale:
+    name: pitale
+    external: true
+
+services:
+
+  caddy:
+    image: caddy:2.8.4-alpine
+    container_name: pitale-caddy
+    hostname: caddy
+    restart: unless-stopped
+    environment:
+      # Default falls back to `localhost` inside the Caddyfile so a
+      # mis-configured deployment still boots with Caddy's internal CA
+      # instead of crashing on a missing host.
+      TLS_HOSTNAME: ${TLS_HOSTNAME:-localhost}
+      # If empty, the Caddyfile falls back to `internal` (Caddy's local
+      # CA). Set to a real address only when TLS_HOSTNAME is public.
+      TLS_EMAIL: ${TLS_EMAIL:-}
+    volumes:
+      - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../data/caddy/data:/data
+      - ../data/caddy/config:/config
+    ports:
+      # :80 needed for Let's Encrypt HTTP-01 challenge AND for the
+      # automatic http→https redirect Caddy installs. :443 is the
+      # actual HTTPS port. Both bind on ${TLS_BIND_HOST:-0.0.0.0}
+      # — set to 127.0.0.1 if you'll only reach Caddy through SSH
+      # forwarding or another reverse proxy upstream.
+      - "${TLS_BIND_HOST:-0.0.0.0}:80:80"
+      - "${TLS_BIND_HOST:-0.0.0.0}:443:443"
+      - "${TLS_BIND_HOST:-0.0.0.0}:443:443/udp"   # HTTP/3
+    networks: [pitale]
+    healthcheck:
+      # Caddy serves /metrics on the admin API at :2019; we use the
+      # simpler "is the HTTPS port answering" check instead.
+      test: ["CMD", "wget", "--no-check-certificate", "--spider", "-q", "https://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

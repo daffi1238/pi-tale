@@ -32,12 +32,14 @@ PROBES_FILE    := compose/probes.yml
 EXTRAS_FILE    := compose/extras.yml
 UNIFI_FILE     := compose/unifi.yml
 WIREGUARD_FILE := compose/wireguard.yml
+TLS_FILE       := compose/tls.yml
 
 CORE_PROJECT      := pi-tale-core
 PROBES_PROJECT    := pi-tale-probes
 EXTRAS_PROJECT    := pi-tale-extras
 UNIFI_PROJECT     := pi-tale-unifi
 WIREGUARD_PROJECT := pi-tale-wireguard
+TLS_PROJECT       := pi-tale-tls
 
 # Stack-specific flag bundles. Used as `$(COMPOSE) $(core_args) <verb>`.
 core_args      := -f $(CORE_FILE)      --env-file $(ENV_FILE)
@@ -45,12 +47,13 @@ probes_args    := -f $(PROBES_FILE)    --env-file $(ENV_FILE)
 extras_args    := -f $(EXTRAS_FILE)    --env-file $(ENV_FILE)
 unifi_args     := -f $(UNIFI_FILE)     --env-file $(ENV_FILE)
 wireguard_args := -f $(WIREGUARD_FILE) --env-file $(ENV_FILE)
+tls_args       := -f $(TLS_FILE)       --env-file $(ENV_FILE)
 
-.PHONY: help up probes extras unifi wireguard all down restart ps logs \
+.PHONY: help up probes extras unifi wireguard tls all down restart ps logs \
         pull build config validate \
         reload-prometheus reload-alertmanager reload-blackbox \
         telegram-setup secrets-setup wireguard-status wireguard-down \
-        backup restore
+        tls-down backup restore
 
 # ----- discoverability -----
 
@@ -76,10 +79,14 @@ unifi: ## start UniFi stack (stub — no services yet)
 wireguard: ## start the WireGuard gateway + exporter (needs data/wireguard/wg0.conf first)
 	$(COMPOSE) $(wireguard_args) up -d
 
+tls: ## start Caddy HTTPS in front of Grafana (set TLS_HOSTNAME in compose/.env first)
+	$(COMPOSE) $(tls_args) up -d
+
 all: up probes extras ## start core + probes + extras (UniFi is stub-only)
 
 # `-` prefix: keep going if a stack isn't running.
 down: ## stop every pi-tale stack
+	-$(COMPOSE) $(tls_args)       down
 	-$(COMPOSE) $(wireguard_args) down
 	-$(COMPOSE) $(unifi_args)     down
 	-$(COMPOSE) $(extras_args)    down
@@ -88,6 +95,9 @@ down: ## stop every pi-tale stack
 
 wireguard-down: ## stop just the WireGuard gateway (tunnel goes down)
 	$(COMPOSE) $(wireguard_args) down
+
+tls-down: ## stop just the TLS terminator (Grafana keeps plain :3000)
+	$(COMPOSE) $(tls_args) down
 
 restart: down all ## stop then start core + probes + extras
 
@@ -126,6 +136,7 @@ config: ## `docker compose config -q` for every compose file
 	$(COMPOSE) -f $(EXTRAS_FILE)    config -q
 	$(COMPOSE) -f $(UNIFI_FILE)     config -q
 	$(COMPOSE) -f $(WIREGUARD_FILE) config -q
+	$(COMPOSE) -f $(TLS_FILE)       config -q
 
 validate: config ## alias for `config`
 
