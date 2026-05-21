@@ -166,6 +166,32 @@ for entry in "${DATA_DIRS[@]}"; do
   chmod 0750 "${d}"
 done
 
+# Alertmanager's `bot_token_file` and rendered config live here. We
+# make both directories owned by alertmanager's uid so
+# `scripts/telegram-setup.sh` (run via sudo) can write into them and the
+# container reads them without further chown gymnastics.
+for sub in secrets runtime; do
+  d="${DATA_ROOT}/alertmanager/${sub}"
+  if [[ ! -d "${d}" ]]; then
+    mkdir -p "${d}"
+    info "Created ${d}"
+  fi
+  chown 65534:65534 "${d}"
+  chmod 0750 "${d}"
+done
+
+# WireGuard gateway: user-managed wg0.conf lives directly under
+# data/wireguard/. Owned by root because the gateway container runs as
+# root inside its netns (NET_ADMIN requires it) and the file holds the
+# Pi's WireGuard private key.
+d="${DATA_ROOT}/wireguard"
+if [[ ! -d "${d}" ]]; then
+  mkdir -p "${d}"
+  info "Created ${d}"
+fi
+chown 0:0 "${d}"
+chmod 0700 "${d}"
+
 ok "Data directories ready under ${DATA_ROOT}"
 
 # ----------------------------------------------------------------------------

@@ -1,0 +1,100 @@
+# Alerts about the monitoring stack itself and the things it watches.
+# Distinct from host.yml so we can route them differently later (e.g.
+# stack-down might need a separate receiver from host-down).
+
+groups:
+
+  - name: pi-tale-tls
+    interval: 1m
+    rules:
+
+      # Cert renewal usually happens automatically (Let's Encrypt et al.),
+      # but when it silently breaks you want ~2 weeks of head room. We
+      # guard with `> 0` so probes that never completed a TLS handshake
+      # (where the gauge stays unset / zero) do not trigger this alert.
+      - alert: BlackboxCertExpiringSoon
+        expr: |
+          (probe_ssl_earliest_cert_expiry - time()) / 86400 < 14
+          and probe_ssl_earliest_cert_expiry > 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "TLS cert for {{ $labels.instance }} expires in {{ $value | printf \"%.0f\" }} days"
+          description: "Renew the certificate or check that the auto-renew job is still running."
+
+  - name: pi-tale-content
+    interval: 1m
+    rules:
+
+      # The per-site `http_2xx_title_*` modules set this when the body
+      # regex did NOT match. probe_success=0 already covers it, but this
+      # gives a clearer signal: "site responds but is serving the wrong
+      # page" vs "site is down".
+      - alert: HTTPBodyRegexMismatch
+        expr: probe_failed_due_to_regex{job="blackbox_http"} == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} is up but body regex no longer matches"
+          description: "The expected content (e.g. <title>) is missing from the response. Possible WAF page, default hosting placeholder, or the site has changed."
+
+  - name: pi-tale-containers
+    interval: 1m
+    rules:
+
+      # cAdvisor exposes container_oom_events_total since v0.39. If your
+      # Docker is too old (no /sys/fs/cgroup/memory.oom.kill on cgroupsv2,
+      # or unified hierarchy not enabled) this metric stays absent and
+      # the rule silently never fires — verify with:
+      #   curl -s http://localhost:8081/metrics | grep oom_events
+      - alert: ContainerOOMKilled
+        expr: increase(container_oom_events_total{name!=""}[10m]) > 0
+        for: 0m              # fire on the first event, no debouncing
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container {{ $labels.name }} was OOM-killed"
+          description: "{{ $value | printf \"%.0f\" }} OOM event(s) in the last 10 minutes. Raise mem_limit, fix the leak, or check load."
+
+      # A container that restarts repeatedly almost always means a
+      # crashloop. cAdvisor doesn't expose a counter directly, so we
+      # derive it from container_start_time_seconds changing.
+      - alert: ContainerRestartLoop
+        expr: changes(container_start_time_seconds{name!=""}[15m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} is restarting in a loop"
+          description: "{{ $value | printf \"%.0f\" }} restarts in the last 15 minutes."
+
+  - name: pi-tale-wifi
+    interval: 1m
+    rules:
+
+      # The exporter publishes a timestamp on every successful scan; we
+      # alert when no successful scan has happened for 5+ minutes. This
+      # catches kernel driver hangs and adapter disconnects, both of
+      # which are common with USB WiFi on the Pi.
+      - alert: WifiExporterStale
+        expr: time() - pitale_wifi_scan_last_success_timestamp_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "wifi_exporter has not scanned for {{ $value | humanizeDuration }}"
+          description: "Driver hung, USB disconnect, or container down. Check `docker logs pitale-wifi-exporter`."
+
+      # Distinct from "scan is stale": this catches the container itself
+      # being down, where the metric series would be missing entirely
+      # and the rule above could not fire.
+      - alert: WifiExporterDown
+        expr: up{job="wifi_exporter"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "wifi_exporter is unreachable from Prometheus"
+          description: "The exporter container is likely down. `make ps` to confirm, `make probes` to restart."

@@ -1,7 +1,13 @@
 # pi-tale — extras layer.
 #
-# Optional operator-friendly services. Stack on top of core:
-#   docker compose -f compose/core.yml -f compose/extras.yml --env-file compose/.env up -d
+# Optional operator-friendly services. Separate compose project from
+# core (own `name:` below) — bring it up ALONGSIDE core, not stacked:
+#
+#   make extras
+#   # or:  docker compose -f compose/extras.yml --env-file compose/.env up -d
+#
+# Stacking `-f core.yml -f extras.yml` would merge them into a single
+# project and collide with core's already-running containers.
 #
 # Currently shipped:
 #   - Uptime Kuma     :3001   friendly UI to manage ping/HTTP/TCP checks.
@@ -28,7 +34,7 @@ services:
     volumes:
       - ../data/uptime-kuma:/app/data
     ports:
-      - "${UPTIME_KUMA_PORT:-3001}:3001"
+      - "${BIND_HOST:-0.0.0.0}:${UPTIME_KUMA_PORT:-3001}:3001"
     networks: [pitale]
     healthcheck:
       test: ["CMD", "node", "/app/extra/healthcheck"]

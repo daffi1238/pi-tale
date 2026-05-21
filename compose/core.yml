@@ -49,7 +49,7 @@ services:
       - ../prometheus/targets:/etc/prometheus/targets:ro
       - ../data/prometheus:/prometheus
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "${BIND_HOST:-0.0.0.0}:${PROMETHEUS_PORT:-9090}:9090"
     networks: [pitale]
     # Allow Prometheus to reach exporters that run with `network_mode: host`
     # (e.g. wifi_exporter in compose/probes.yml). `host-gateway` resolves
@@ -73,10 +73,19 @@ services:
       - --storage.path=/alertmanager
       - --web.external-url=http://localhost:${ALERTMANAGER_PORT:-9093}/
     volumes:
-      - ../alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      # The alertmanager YAML is RENDERED from a template by
+      # `make telegram-setup` (scripts/telegram-setup.sh). It substitutes
+      # `__TELEGRAM_CHAT_ID__` in alertmanager/alertmanager.yml.tmpl with
+      # TELEGRAM_CHAT_ID from compose/.env. The committed template lives
+      # in alertmanager/; the rendered output is gitignored under data/.
+      - ../data/alertmanager/runtime/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ../data/alertmanager:/alertmanager
+      # bot_token_file lives here. Same render step writes it; alertmanager
+      # reads it at config load / reload, so the secret never enters the
+      # image or any committed file.
+      - ../data/alertmanager/secrets:/etc/alertmanager/secrets:ro
     ports:
-      - "${ALERTMANAGER_PORT:-9093}:9093"
+      - "${BIND_HOST:-0.0.0.0}:${ALERTMANAGER_PORT:-9093}:9093"
     networks: [pitale]
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9093/-/healthy"]
@@ -103,7 +112,7 @@ services:
       - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
       - ../data/grafana:/var/lib/grafana
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "${BIND_HOST:-0.0.0.0}:${GRAFANA_PORT:-3000}:3000"
     networks: [pitale]
     depends_on:
       - prometheus
@@ -125,7 +134,7 @@ services:
       - ../loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - ../data/loki:/loki
     ports:
-      - "${LOKI_PORT:-3100}:3100"
+      - "${BIND_HOST:-0.0.0.0}:${LOKI_PORT:-3100}:3100"
     networks: [pitale]
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:3100/ready || exit 1"]
@@ -206,5 +215,5 @@ services:
       - /dev/disk/:/dev/disk:ro
       - /etc/machine-id:/etc/machine-id:ro
     ports:
-      - "${CADVISOR_PORT:-8081}:8080"
+      - "${BIND_HOST:-0.0.0.0}:${CADVISOR_PORT:-8081}:8080"
     networks: [pitale]

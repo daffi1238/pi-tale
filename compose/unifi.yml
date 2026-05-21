@@ -4,8 +4,9 @@
 #   - linuxserver/unifi-network-application (or jacobalberty/unifi)
 #   - golift/unifi-poller scraping the controller and exposing /metrics
 #
-# Stack with core:
-#   docker compose -f compose/core.yml -f compose/unifi.yml --env-file compose/.env up -d
+# Separate compose project — bring it up alongside core, not stacked:
+#   make unifi
+#   # or:  docker compose -f compose/unifi.yml --env-file compose/.env up -d
 
 name: pi-tale-unifi
 

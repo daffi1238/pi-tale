@@ -1,0 +1,97 @@
+# pi-tale — Alertmanager configuration TEMPLATE.
+#
+# This file is NOT what alertmanager loads at runtime. It is the source
+# from which `make telegram-setup` (scripts/telegram-setup.sh) renders
+# `data/alertmanager/runtime/alertmanager.yml` by substituting the
+# `__TELEGRAM_CHAT_ID__` placeholder with TELEGRAM_CHAT_ID from
+# compose/.env. The rendered file is gitignored.
+#
+# Why a template:
+#   - Alertmanager mounts its YAML read-only and does NOT expand env vars.
+#   - Keeping the chat id in compose/.env means a single source of truth
+#     for personal/install-specific values (token AND chat id together).
+#   - The bot token uses alertmanager's native `bot_token_file` directive
+#     and stays out of any committed YAML.
+#
+# To change the chat id, edit compose/.env and re-run:
+#   sudo make telegram-setup
+#
+# The placeholder string `__TELEGRAM_CHAT_ID__` is the only render-time
+# substitution. Any `${VAR}` you see below is alertmanager Go-template
+# syntax (`{{ ... }}`) and is processed by alertmanager at notify time,
+# not by the renderer.
+
+global:
+  resolve_timeout: 5m
+  # Used by the SMTP receiver when you enable it.
+  # smtp_smarthost: 'smtp.example.com:587'
+  # smtp_from: 'pi-tale@example.com'
+  # smtp_auth_username: 'pi-tale@example.com'
+  # smtp_auth_password: 'CHANGE_ME'
+  # smtp_require_tls: true
+
+route:
+  receiver: 'null'
+  group_by: ['alertname', 'severity', 'host']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Watchdog is the deadman's switch — meant to fire continuously to
+    # prove the alert pipeline works. Don't actually notify on it.
+    - matchers:
+        - alertname = Watchdog
+      receiver: 'null'
+
+    # Critical → Telegram, faster repeat. Add a `continue: true` here if
+    # you also want criticals to go to a future SMTP/PagerDuty receiver.
+    - matchers:
+        - severity = critical
+      receiver: 'telegram'
+      repeat_interval: 1h
+
+inhibit_rules:
+  # If we have lost the node, suppress per-probe alerts about that node.
+  - source_matchers:
+      - severity = critical
+      - alertname = NodeExporterDown
+    target_matchers:
+      - severity =~ "warning|info"
+    equal: ['host']
+
+receivers:
+
+  - name: 'null'
+
+  - name: 'telegram'
+    telegram_configs:
+      - bot_token_file: /etc/alertmanager/secrets/telegram_bot_token
+        # Filled in by `make telegram-setup` from TELEGRAM_CHAT_ID in
+        # compose/.env. Group ids are negative (`-100…` for supergroups);
+        # a positive id means the bot will DM that user privately.
+        chat_id: __TELEGRAM_CHAT_ID__
+        send_resolved: true
+        parse_mode: HTML
+        # group_by in the route keeps each Telegram message ≤ ~10 alerts
+        # in practice, well below Telegram's 4096-char limit even with
+        # the HTML overhead. If you ever start hitting it, switch to a
+        # positional `range $i, $a := .Alerts` and break at $i == 10.
+        message: |
+          <b>[{{ .Status | toUpper }}{{ if eq .Status "firing" }} · {{ .CommonLabels.severity | toUpper }}{{ end }}]</b> {{ .CommonLabels.alertname }}
+          {{ range .Alerts }}
+          • <b>{{ .Annotations.summary }}</b>
+            {{ .Annotations.description }}
+            {{ if .Labels.instance }}<i>instance:</i> <code>{{ .Labels.instance }}</code>{{ end }}
+          {{ end }}
+
+  # --- Email / SMTP (uncomment to enable) ---------------------------------
+  # Set the SMTP block under `global` above first.
+  # - name: 'email'
+  #   email_configs:
+  #     - to: 'alerts@example.com'
+  #       send_resolved: true
+  #       headers:
+  #         Subject: '[pi-tale][{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+
+# templates:
+#   - /etc/alertmanager/templates/*.tmpl
