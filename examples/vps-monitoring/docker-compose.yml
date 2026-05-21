@@ -1,0 +1,112 @@
+# VPS side — exporters that pi-tale (on the Pi) scrapes over the
+# WireGuard overlay. Drop this file on the VPS and run:
+#
+#   docker compose -f docker-compose.yml --env-file .env up -d
+#
+# All listeners bind to the WireGuard interface (default 10.50.0.2) so
+# nothing is exposed on the public internet — even if you forget to
+# firewall the ports, the exporters won't be reachable from the outside.
+#
+# Defaults assume:
+#   - WireGuard subnet 10.50.0.0/24 (Pi=.1, VPS=.2).
+#   - The VPS Docker daemon at /var/run/docker.sock.
+#   - Postgres reachable at db:5432 (adjust DATA_SOURCE_NAME).
+#   - nginx reachable at the host on http://127.0.0.1/stub_status
+#     (see nginx-stub-status.conf in this folder).
+
+name: pi-tale-vps
+
+# We use host network for exporters that need to see the host's interfaces
+# (node_exporter, cAdvisor). For the rest we declare an internal network.
+networks:
+  monitoring:
+    driver: bridge
+
+services:
+
+  node_exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: pitale-vps-node-exporter
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|var/lib/docker/.+)($$|/)
+      - --collector.netclass.ignored-devices=^(veth.*|docker.*|br-.*|lo|wg.*)$$
+      # Bind ONLY on the WireGuard overlay address. If WG is down, the
+      # exporter is unreachable from anywhere — by design.
+      - --web.listen-address=${WG_VPS_IP:-10.50.0.2}:9100
+    network_mode: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: pitale-vps-cadvisor
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    command:
+      - --port=9080
+      - --listen_ip=${WG_VPS_IP:-10.50.0.2}
+      - --housekeeping_interval=30s
+      - --docker_only=true
+      - --store_container_labels=false
+    network_mode: host
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+
+  # nginx-prometheus-exporter scrapes the stub_status endpoint on the
+  # local nginx and exposes it as Prometheus metrics. Enable stub_status
+  # in your nginx config first — see examples/vps-monitoring/
+  # nginx-stub-status.conf for the snippet.
+  nginx_exporter:
+    image: nginx/nginx-prometheus-exporter:1.3.0
+    container_name: pitale-vps-nginx-exporter
+    restart: unless-stopped
+    command:
+      - --nginx.scrape-uri=${NGINX_STUB_URL:-http://host.docker.internal/stub_status}
+      - --web.listen-address=:9113
+    networks: [monitoring]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # Bind on the WG overlay only.
+      - "${WG_VPS_IP:-10.50.0.2}:9113:9113"
+
+  # Read-only Postgres metrics. DATA_SOURCE_NAME picks a user that ONLY
+  # has SELECT on pg_stat_* views — see README.md for the SQL.
+  postgres_exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: pitale-vps-postgres-exporter
+    restart: unless-stopped
+    environment:
+      # Format: postgresql://user:password@host:port/dbname?sslmode=disable
+      DATA_SOURCE_NAME: ${POSTGRES_EXPORTER_DSN}
+    networks: [monitoring]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${WG_VPS_IP:-10.50.0.2}:9187:9187"
+
+  # Promtail ships container logs to Loki on the Pi (over WG).
+  promtail:
+    image: grafana/promtail:3.3.2
+    container_name: pitale-vps-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [monitoring]

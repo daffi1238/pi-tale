@@ -1,0 +1,169 @@
+# Alerts for the VPS scraped over the WireGuard tunnel, plus the tunnel
+# itself. The `host="vps"` label is set by the per-target files in
+# prometheus/targets/vps-*-*.yml — keep that label on every target you
+# add or none of these expressions will match.
+
+groups:
+
+  - name: pi-tale-wireguard
+    interval: 30s
+    rules:
+
+      # WireGuard reports `wireguard_latest_handshake_seconds` as a unix
+      # timestamp; an idle tunnel re-handshakes every ~120s and the
+      # PersistentKeepalive is 25s. Five minutes without a handshake is
+      # decisively down, not "lossy".
+      - alert: WireguardTunnelDown
+        expr: time() - wireguard_latest_handshake_seconds > 300
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "WireGuard tunnel to peer is down"
+          description: "No successful handshake in {{ $value | humanizeDuration }}. Check the VPS firewall (UDP/${WG_PORT:-51820}), `systemctl status wg-quick@wg0` on both ends."
+
+      # The exporter publishes the metric only when wg0 is up. Absence
+      # of the series means the exporter container is dead OR the wg0
+      # interface is missing on the host. Either is bad enough to page.
+      - alert: WireguardExporterDown
+        expr: absent(wireguard_latest_handshake_seconds) and up{job="wireguard_exporter"} == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "wireguard_exporter is up but reports no peers"
+          description: "wg0 might be missing on the Pi. Run `sudo wg show wg0` and re-up with `systemctl restart wg-quick@wg0`."
+
+  - name: pi-tale-vps-host
+    interval: 1m
+    rules:
+
+      # If the VPS node_exporter is unreachable, we have lost host
+      # visibility. Could be: VPS down, WG tunnel down (inhibited by
+      # WireguardTunnelDown below), or the container crashed.
+      - alert: VpsNodeDown
+        expr: up{job="vps_node"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "VPS node_exporter unreachable"
+          description: "Prometheus has failed to scrape {{ $labels.instance }} for 3 minutes."
+
+      - alert: VpsHighCpu
+        expr: |
+          100 - (avg by (host, instance) (rate(node_cpu_seconds_total{host="vps",mode="idle"}[5m])) * 100) > 90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "VPS sustained CPU > 90% for 15m"
+          description: "Average CPU usage on {{ $labels.host }} is {{ $value | printf \"%.1f\" }}%."
+
+      - alert: VpsLowMemory
+        expr: (node_memory_MemAvailable_bytes{host="vps"} / node_memory_MemTotal_bytes{host="vps"}) * 100 < 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "VPS available memory < 10%"
+          description: "Less than 10% of memory free for 10 minutes. Risk of OOM-kills."
+
+      # Critical because filesystems filling up tend to break things in
+      # ways that propagate (postgres can't write WAL, nginx can't log,
+      # docker can't pull/build).
+      - alert: VpsDiskFillingUp
+        expr: |
+          (node_filesystem_avail_bytes{host="vps",fstype!~"tmpfs|overlay|squashfs"}
+           / node_filesystem_size_bytes{host="vps",fstype!~"tmpfs|overlay|squashfs"}) * 100 < 10
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "VPS disk almost full on {{ $labels.mountpoint }}"
+          description: "{{ $value | printf \"%.1f\" }}% free. Clean up logs/old images or upgrade the volume."
+
+  - name: pi-tale-vps-containers
+    interval: 1m
+    rules:
+
+      # Same condition as the Pi-side ContainerOOMKilled rule, but scoped
+      # to host=vps to keep the two separate in dashboards.
+      - alert: VpsContainerOOMKilled
+        expr: increase(container_oom_events_total{host="vps",name!=""}[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "VPS container {{ $labels.name }} was OOM-killed"
+          description: "{{ $value | printf \"%.0f\" }} OOM event(s) in 10m. Raise the container's mem_limit or fix the leak."
+
+      - alert: VpsContainerRestartLoop
+        expr: changes(container_start_time_seconds{host="vps",name!=""}[15m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "VPS container {{ $labels.name }} restarting in a loop"
+          description: "{{ $value | printf \"%.0f\" }} restarts in 15m. `docker logs {{ $labels.name }}` on the VPS."
+
+  - name: pi-tale-vps-nginx
+    interval: 1m
+    rules:
+
+      - alert: NginxHighErrorRate
+        # nginx-prometheus-exporter from stub_status exposes
+        # `nginx_http_requests_total` only — no per-status-code breakdown
+        # (stub_status doesn't track them). For real 5xx alerting use
+        # Loki LogQL on the access log; this rule catches the broader
+        # "no requests at all" failure mode, which usually means upstream
+        # down or nginx wedged.
+        expr: rate(nginx_http_requests_total{host="vps"}[5m]) == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "nginx on {{ $labels.host }} is serving zero requests"
+          description: "No requests over 10 minutes. Site offline, traffic blocked at the firewall, or nginx is wedged."
+
+  - name: pi-tale-vps-postgres
+    interval: 1m
+    rules:
+
+      - alert: PostgresDown
+        expr: pg_up{host="vps"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Postgres on {{ $labels.host }} is down"
+          description: "postgres_exporter cannot connect to the database. Check `docker logs postgres` and credentials."
+
+      # max_connections defaults to 100; 80 is the canonical "wake the
+      # DBA up" threshold. If your cluster runs with a higher cap, tune
+      # this expression to a percentage of `pg_settings_max_connections`.
+      - alert: PostgresHighConnections
+        expr: pg_stat_database_numbackends{host="vps"} > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Postgres {{ $labels.datname }} has many active connections"
+          description: "{{ $value | printf \"%.0f\" }} backends. Likely a connection-pool leak or a runaway client."
+
+      # Cache hit ratio < 90% over time is usually a workload that doesn't
+      # fit in shared_buffers — either bump shared_buffers or accept it.
+      # Short windows can dip; we look at 30 min.
+      - alert: PostgresLowCacheHit
+        expr: |
+          (sum by (host) (rate(pg_stat_database_blks_hit{host="vps"}[30m])))
+            /
+          (sum by (host) (rate(pg_stat_database_blks_hit{host="vps"}[30m])
+                        + rate(pg_stat_database_blks_read{host="vps"}[30m])))
+          < 0.90
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Postgres cache hit ratio dropped to {{ $value | printf \"%.1f%%\" }}"
+          description: "shared_buffers not enough for the working set. Check most-read tables and consider raising it."

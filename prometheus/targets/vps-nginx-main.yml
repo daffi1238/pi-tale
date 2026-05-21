@@ -1,0 +1,11 @@
+# nginx-prometheus-exporter on the VPS, scraped through the gateway.
+# Gateway DNAT: wireguard_gateway:9113 → 10.50.0.2:9113 over wg0.
+#
+# stub_status must be enabled in nginx.conf — see
+# examples/vps-monitoring/README.md.
+
+- targets:
+    - wireguard_gateway:9113
+  labels:
+    host: vps
+    instance_name: vps-main

@@ -1,0 +1,11 @@
+# postgres_exporter on the VPS, scraped through the gateway.
+# Gateway DNAT: wireguard_gateway:9187 → 10.50.0.2:9187 over wg0.
+#
+# postgres_exporter needs a read-only DB user — see
+# examples/vps-monitoring/README.md.
+
+- targets:
+    - wireguard_gateway:9187
+  labels:
+    host: vps
+    instance_name: vps-main

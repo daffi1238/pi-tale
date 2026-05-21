@@ -1,0 +1,126 @@
+# pi-tale — WireGuard gateway.
+#
+# Container-scoped WireGuard tunnel. The wg0 interface lives ONLY in the
+# gateway container's network namespace; the Pi host never sees it.
+# Compared to a host-wide tunnel this:
+#
+#   - Limits blast radius if the VPS is compromised: only the gateway
+#     (and the two narrow DNAT paths it forwards) are reachable from
+#     the Pi-side WG address. The Pi's sshd, Grafana, Prometheus UI
+#     etc. stay out of reach.
+#   - Keeps `/etc/wireguard/` on the host empty: the only config lives
+#     under data/wireguard/wg0.conf (gitignored, 0600 root, user-
+#     managed). See data/wireguard/wg0.conf.example for the shape.
+#   - Means the wireguard_exporter has to share the gateway's netns to
+#     see wg0; that is what `network_mode: service:wireguard_gateway`
+#     does below.
+#
+# This is a SEPARATE compose project from core. Bring it up alongside:
+#
+#   make wireguard            # docker compose -f compose/wireguard.yml up -d
+#
+# The pitale network is `external: true` — it is created by core.yml.
+# This project must therefore start AFTER core (`make up && make wireguard`).
+
+name: pi-tale-wireguard
+
+networks:
+  pitale:
+    name: pitale
+    external: true
+
+services:
+
+  wireguard_gateway:
+    build:
+      context: ../wireguard
+    image: pi-tale/wireguard-gateway:0.1.0
+    container_name: pitale-wireguard-gateway
+    hostname: wireguard_gateway
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    # /dev/net/tun is needed for any wg implementation that falls back
+    # to userspace. With the in-tree kernel module (kernel >= 5.6) it is
+    # not strictly required, but keeping it makes the container portable
+    # to hosts without the module.
+    devices:
+      - /dev/net/tun
+    sysctls:
+      # Required for the container to act as a router between eth0 and wg0.
+      net.ipv4.ip_forward: "1"
+      # Required by WireGuard's fwmark-based loop prevention.
+      net.ipv4.conf.all.src_valid_mark: "1"
+    environment:
+      WG_IFACE: ${WG_IFACE:-wg0}
+      VPS_TARGET_IP: ${WG_VPS_IP:-10.50.0.2}
+      # Space-separated. Adjust if you change the VPS exporter ports.
+      VPS_TARGET_PORTS: "9100 9080 9113 9187"
+      LOKI_HOST: loki
+      LOKI_PORT: "3100"
+    volumes:
+      # User-managed WireGuard config. Drop your own wg0.conf at
+      # data/wireguard/wg0.conf (mode 0600, root-owned). The entrypoint
+      # copies it into /etc/wireguard/wg0.conf inside the container
+      # before running `wg-quick up`. See data/wireguard/wg0.conf.example
+      # for the expected shape. Edits require a container recreate:
+      #   docker compose -f compose/wireguard.yml up -d --force-recreate
+      - ../data/wireguard/wg0.conf:/wg/wg0.conf:ro
+    networks: [pitale]
+    healthcheck:
+      # Healthy if wg0 has had a handshake in the last 5 minutes. Matches
+      # the WireguardTunnelDown alert threshold in prometheus/rules/vps.yml.
+      test: ["CMD-SHELL", "wg show wg0 latest-handshakes | awk '$$2 > 0 && (systime() - $$2) < 300 { ok=1 } END { exit !ok }'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Reads `wg show all dump` and exposes per-peer metrics on :9586.
+  # Joining the gateway's netns is what lets it see wg0; otherwise it
+  # would run in its own empty netns and find no interfaces.
+  wireguard_exporter:
+    build:
+      context: ../exporters/wireguard
+    image: pi-tale/wireguard-exporter:0.1.0
+    container_name: pitale-wireguard-exporter
+    restart: unless-stopped
+    network_mode: "service:wireguard_gateway"
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      wireguard_gateway:
+        condition: service_started
+    environment:
+      WG_SCAN_INTERVAL: ${WG_SCAN_INTERVAL:-30}
+      WG_LISTEN_HOST: 0.0.0.0
+      WG_LISTEN_PORT: ${WIREGUARD_LISTEN_PORT:-9586}
+    # No `networks:`, no `hostname:` — both are inherited from the
+    # gateway. Prometheus reaches this exporter at
+    # `wireguard_gateway:9586` (the gateway's pitale-bridge hostname).
+
+  # Second blackbox_exporter instance, dedicated to ICMP/HTTP/TCP probes
+  # of hosts INSIDE the WG overlay (10.0.0.0/24). It shares the gateway's
+  # netns — same pattern as wireguard_exporter — so wg0 is directly
+  # reachable and ICMP needs no extra NAT plumbing. The pitale-bridge
+  # blackbox in core.yml keeps doing LAN/public probes; this one only
+  # handles VPN targets via the `blackbox_icmp_vpn` job in prometheus.yml.
+  #
+  # Prometheus reaches it at `wireguard_gateway:9115` (the netns is
+  # shared, so port 9115 binds on the gateway's hostname).
+  blackbox_vpn:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: pitale-blackbox-vpn
+    restart: unless-stopped
+    network_mode: "service:wireguard_gateway"
+    # NET_RAW for ICMP raw sockets. NET_ADMIN is inherited from the
+    # gateway's namespace but is not needed by blackbox itself.
+    cap_add:
+      - NET_RAW
+    depends_on:
+      wireguard_gateway:
+        condition: service_started
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+    volumes:
+      - ../blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro

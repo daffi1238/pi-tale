@@ -1,0 +1,52 @@
+# Promtail on the VPS — ships container logs to Loki on the Pi over
+# the WireGuard tunnel. Loki has no auth, which is fine because the
+# only network path to it is the encrypted WG overlay.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  # WG_PI_IP from compose/.env (defaults to 10.50.0.1).
+  - url: http://10.50.0.1:3100/loki/api/v1/push
+    # Tenant header is optional unless you turn on Loki multi-tenancy.
+    # tenant_id: vps
+
+scrape_configs:
+
+  # Every container's JSON logfile on disk. Promtail tails them and
+  # decorates each line with the container's labels (so Grafana Explore
+  # can filter by compose project, image, container name).
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: 'stream'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: 'compose_project'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'compose_service'
+      # Every line gets host=vps so dashboards/log queries can mirror
+      # the Prometheus label scheme.
+      - target_label: 'host'
+        replacement: 'vps'
+
+  # Host syslog — kernel messages, sshd, cron, anything that doesn't
+  # come from a Docker container. Drop this block if you have no
+  # interest in host-level logs.
+  - job_name: syslog
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: syslog
+          host: vps
+          __path__: /var/log/syslog

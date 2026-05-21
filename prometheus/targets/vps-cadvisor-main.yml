@@ -1,0 +1,8 @@
+# cAdvisor on the VPS, scraped through the WireGuard gateway.
+# Gateway DNAT: wireguard_gateway:9080 → 10.50.0.2:9080 over wg0.
+
+- targets:
+    - wireguard_gateway:9080
+  labels:
+    host: vps
+    instance_name: vps-main

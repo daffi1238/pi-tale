@@ -1,0 +1,15 @@
+# node_exporter on the VPS, scraped through the WireGuard gateway.
+#
+# The actual `instance` is the VPS, but Prometheus connects to
+# `wireguard_gateway:9100` which DNATs the traffic out wg0 to
+# 10.50.0.2:9100. See compose/wireguard.yml for the forwarding rules.
+#
+# Drop additional VPSes by adding more files (vps-node-foo.yml). Each
+# extra VPS requires its own gateway port forwarding — for now this
+# setup assumes ONE VPS.
+
+- targets:
+    - wireguard_gateway:9100
+  labels:
+    host: vps
+    instance_name: vps-main

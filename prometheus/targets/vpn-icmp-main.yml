@@ -1,0 +1,32 @@
+# pi-tale — ICMP liveness probes for hosts inside the WG overlay.
+#
+# Scraped by the `blackbox_icmp_vpn` job (prometheus.yml), which sends
+# probes through the second blackbox instance that shares the gateway's
+# netns. That instance has direct visibility of wg0, so ICMP to 10.0.0.x
+# is routed natively over the tunnel (no DNAT plumbing).
+#
+# File-SD: edit freely, picked up within 1m. No reload needed.
+# Each entry under `targets` is one host. Labels propagate to series.
+
+- targets:
+    - 10.0.0.1
+  labels:
+    kind: vpn
+    role: vps
+    name: vps-main
+
+# Example for additional peers — uncomment and adapt as you connect them.
+#
+# - targets:
+#     - 10.0.0.10
+#   labels:
+#     kind: vpn
+#     role: laptop
+#     name: dev-laptop
+#
+# - targets:
+#     - 10.0.0.20
+#     - 10.0.0.21
+#   labels:
+#     kind: vpn
+#     role: service

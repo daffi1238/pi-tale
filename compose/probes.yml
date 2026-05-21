@@ -1,7 +1,8 @@
 # pi-tale — probes layer.
 #
-# Optional exporters that sit alongside the core stack. Right now this is
-# just the WiFi RF probe; SNMP / unifi-poller will land here too.
+# Optional exporters that sit alongside the core stack. Right now just
+# the WiFi RF probe; wireguard_exporter moved to compose/wireguard.yml
+# (it needs to share the gateway's netns to see wg0).
 #
 # This is a SEPARATE compose project from core (same pattern as
 # extras.yml). Bring it up next to the core stack with:

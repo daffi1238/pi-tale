@@ -82,6 +82,27 @@ scrape_configs:
       - target_label: __address__
         replacement: blackbox_exporter:9115
 
+  # ICMP probes for hosts INSIDE the WG overlay (10.0.0.0/24). Routed
+  # through a second blackbox instance (blackbox_vpn, compose/wireguard.yml)
+  # that shares the gateway's netns and therefore sees wg0 directly. The
+  # glob is `vpn-icmp-*.yml`, deliberately distinct from `blackbox-icmp-*`
+  # so the LAN job above does NOT also pick up these targets.
+  - job_name: blackbox_icmp_vpn
+    metrics_path: /probe
+    params:
+      module: [icmp]
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/vpn-icmp-*.yml
+        refresh_interval: 1m
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: wireguard_gateway:9115
+
   - job_name: blackbox_http
     metrics_path: /probe
     # Default module if a target file does not override it via a `module`
@@ -107,6 +128,61 @@ scrape_configs:
         target_label: __param_module
       - target_label: __address__
         replacement: blackbox_exporter:9115
+
+  # --- WireGuard health (compose/wireguard.yml) ---------------------------
+  #
+  # The wireguard_exporter shares the gateway's network namespace
+  # (`network_mode: service:wireguard_gateway`) — needed so it can see
+  # the wg0 interface, which lives only inside the gateway container.
+  # As a side effect, its :9586 listener is reachable from the pitale
+  # bridge at `wireguard_gateway:9586` (the gateway's hostname).
+  #
+  # Metrics exposed:
+  #   wireguard_latest_handshake_seconds (timestamp, seconds since epoch)
+  #   wireguard_sent_bytes_total
+  #   wireguard_received_bytes_total
+  #
+  # The WireguardTunnelDown rule (prometheus/rules/vps.yml) alerts when
+  # latest_handshake_seconds drifts > 5 min (PersistentKeepalive is 25s,
+  # so 5 min of nothing is a real outage, not a hiccup).
+
+  - job_name: wireguard_exporter
+    static_configs:
+      - targets: ["wireguard_gateway:9586"]
+        labels:
+          host: pi-tale-node
+
+  # --- VPS exporters via WireGuard ---------------------------------------
+  #
+  # All VPS targets are reachable via the WG overlay (default 10.50.0.2).
+  # File-SD per exporter type so adding/removing a VPS is a one-line edit
+  # in prometheus/targets/vps-*.yml — no Prometheus reload-loop required.
+  #
+  # `host: vps` label lets dashboards filter Pi vs VPS in one expression.
+
+  - job_name: vps_node
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/vps-node-*.yml
+        refresh_interval: 1m
+
+  - job_name: vps_cadvisor
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/vps-cadvisor-*.yml
+        refresh_interval: 1m
+
+  - job_name: vps_nginx
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/vps-nginx-*.yml
+        refresh_interval: 1m
+
+  - job_name: vps_postgres
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/vps-postgres-*.yml
+        refresh_interval: 1m
 
   # --- WiFi RF probe (compose/probes.yml) ---------------------------------
   #
