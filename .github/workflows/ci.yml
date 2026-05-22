@@ -71,10 +71,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: amtool check-config
+      # The committed source of truth is alertmanager.yml.tmpl, which
+      # carries a `__TELEGRAM_CHAT_ID__` placeholder. amtool refuses to
+      # validate it as-is (the placeholder fails the `chat_id` integer
+      # check), so we substitute a representative supergroup id first
+      # and validate the rendered output the same way the production
+      # render step in scripts/telegram-setup.sh would.
+      - name: Render template and run amtool check-config
         run: |
+          mkdir -p .ci
+          sed 's|__TELEGRAM_CHAT_ID__|-1001234567890|g' \
+            alertmanager/alertmanager.yml.tmpl > .ci/alertmanager.yml
           docker run --rm \
-            -v "${{ github.workspace }}/alertmanager:/etc/alertmanager:ro" \
+            -v "${{ github.workspace }}/.ci:/etc/alertmanager:ro" \
             --entrypoint amtool \
             "${ALERTMANAGER_IMAGE}" \
             check-config /etc/alertmanager/alertmanager.yml
@@ -84,29 +93,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # GRAFANA_ADMIN_PASSWORD is marked required in core.yml. Compose
-      # would refuse to render the file with the variable empty.
+      # GRAFANA_ADMIN_PASSWORD is no longer directly consumed by compose
+      # (Grafana now reads it via `*__FILE` — see compose/core.yml), but
+      # the .env file still carries it for `scripts/secrets-setup.sh`.
+      # Copying the example is enough for `compose config` to render.
       - name: Prepare compose/.env
-        run: |
-          cp compose/.env.example compose/.env
-          sed -i 's/^GRAFANA_ADMIN_PASSWORD=.*/GRAFANA_ADMIN_PASSWORD=ci-placeholder/' compose/.env
+        run: cp compose/.env.example compose/.env
       - name: Validate each compose project standalone
         run: |
           set -e
-          for f in compose/core.yml compose/probes.yml compose/extras.yml compose/unifi.yml; do
+          # Each YAML declares its own `name:` and is brought up
+          # independently via `make <stack>`. We validate them
+          # standalone — there are no documented "stacked" combinations.
+          for f in compose/core.yml compose/probes.yml compose/extras.yml \
+                   compose/unifi.yml compose/wireguard.yml compose/tls.yml; do
             echo "--- ${f}"
             docker compose -f "${f}" --env-file compose/.env config -q
-          done
-      - name: Validate documented stacked invocations
-        run: |
-          set -e
-          # Combinations advertised in README.md / docs.
-          declare -a STACKS=(
-            "compose/core.yml compose/extras.yml"
-            "compose/core.yml compose/unifi.yml"
-          )
-          for stack in "${STACKS[@]}"; do
-            echo "--- ${stack}"
-            # shellcheck disable=SC2086
-            docker compose $(printf -- '-f %s ' ${stack}) --env-file compose/.env config -q
           done
