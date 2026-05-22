@@ -7,7 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Containerised dashboards for node_exporter and cAdvisor**
+  (`grafana/dashboards/{node-exporter,cadvisor}.json`). Built from
+  scratch using the existing pi-tale colour/threshold conventions so
+  cold-boot works offline — no more importing dashboard #1860 from
+  grafana.com on first launch. The cAdvisor dashboard ships a `name`
+  template variable for filtering and a snapshot table sorted by
+  container name.
+- **Two alerts and five recording rules.**
+  `prometheus/rules/observability.yml` gains
+  `PrometheusTSDBCompactionFailing` (critical, fires on any increase in
+  `prometheus_tsdb_compactions_failed_total` over 1h — compaction
+  failures do not self-heal) and `LokiIngestionErrors` (warning, fires
+  on sustained 5xx on `.*push.*` routes).
+  `prometheus/rules/recording.yml` (new) pre-aggregates the
+  Pi's expensive panels: `instance:probe_duration_seconds:p99_5m`,
+  `instance:probe_success:ratio_1h`,
+  `bssid_ssid:pitale_wifi_bss_signal_dbm:avg5m` and friends.
+- **Optional TLS terminator** (`compose/tls.yml` + `caddy/Caddyfile`).
+  Caddy 2.8 in front of Grafana with auto-issued certs — Let's Encrypt
+  if `TLS_HOSTNAME` is a real domain, internal CA otherwise. Brought
+  up via `make tls`; combine with `BIND_HOST=127.0.0.1` to make HTTPS
+  the only path in. Blocks `/metrics`, `/admin/*` and `/debug/*` from
+  the public route while leaving the internal Prometheus scrape on
+  `grafana:3000` untouched.
+
 ### Changed
+- **Secrets via `*_FILE` for Grafana admin + SMTP.** Compose no longer
+  carries `GF_SECURITY_ADMIN_PASSWORD` in plain env — Grafana reads it
+  from `/etc/grafana/secrets/admin_password` (bind-mounted from
+  `data/grafana/secrets/`) via its native
+  `GF_SECURITY_ADMIN_PASSWORD__FILE`. Same shape now documented for
+  SMTP in the alertmanager template. `scripts/secrets-setup.sh` (new,
+  shellcheck-clean) reads `GRAFANA_ADMIN_PASSWORD` and `SMTP_PASSWORD`
+  from `compose/.env` and writes both files with the right uid +
+  inode-preserving overwrite. `make secrets-setup` wraps it via sudo.
+  **Migration:** existing installs MUST run `sudo make secrets-setup`
+  once before `make up` or Grafana will fail to start.
+- **cAdvisor no longer runs `privileged: true`.** Replaced with the
+  three caps cAdvisor actually needs on Raspberry Pi OS bookworm
+  (cgroupsv2, no AppArmor enforcement by default): `SYS_ADMIN`,
+  `SYS_PTRACE`, `DAC_READ_SEARCH`. `/dev/kmsg` is still passed
+  explicitly. Significantly reduces blast radius (privileged grants
+  ALL caps and lifts seccomp).
+- **wifi_exporter listener off the LAN.** The `pitale` bridge now has
+  a static IPAM block (172.31.0.0/24, gateway 172.31.0.1). The
+  `network_mode: host` exporter binds on that gateway IP by default
+  instead of 0.0.0.0, so the metrics endpoint is only reachable from
+  the docker bridge — not from any LAN host. Prometheus inside the
+  bridge keeps reaching it via `host.docker.internal:9116`.
+- **CI tracks the post-baseline layout.** `amtool` validates the
+  rendered template (the committed source is `alertmanager.yml.tmpl`),
+  the compose job validates `wireguard.yml` and `tls.yml` standalone,
+  and the misleading "stacked compose" combinations are removed since
+  each YAML now declares its own `name:` and is brought up via
+  separate `make <stack>` targets.
+
 - **WireGuard moved from the host to a dedicated container** for blast
   radius isolation. With the previous host-mode tunnel a compromised
   VPS could reach any service the Pi exposed on `0.0.0.0` (sshd,
