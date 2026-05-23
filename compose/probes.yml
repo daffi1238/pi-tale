@@ -48,7 +48,7 @@ services:
       WIFI_IFACE: ${WIFI_IFACE:-wlan1}
       WIFI_SCAN_INTERVAL: ${WIFI_SCAN_INTERVAL:-30}
       WIFI_SCAN_TIMEOUT: ${WIFI_SCAN_TIMEOUT:-20}
-      WIFI_SSID_PATTERNS: ${WIFI_SSID_PATTERNS:-MOVISTAR-WIFI6-C738*,vodafone317B*}
+      WIFI_SSID_PATTERNS: ${WIFI_SSID_PATTERNS:-MOVISTAR-WIFI6-C738*,vodafone317B*,HCN-Wifi*}
       # Bind on the pitale bridge gateway, not 0.0.0.0. Override only
       # if you change the bridge subnet in core.yml.
       WIFI_LISTEN_HOST: ${WIFI_LISTEN_HOST:-172.31.0.1}
