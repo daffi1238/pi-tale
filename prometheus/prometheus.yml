@@ -188,10 +188,11 @@ scrape_configs:
   #
   # The wifi_exporter container runs with `network_mode: host`, so its
   # listener is bound on the host directly. To keep it off the LAN, it
-  # binds on the pitale bridge gateway IP (default 172.31.0.1, set in
-  # compose/core.yml IPAM). Prometheus reaches it via
-  # `host.docker.internal`, which the docker daemon maps to that same
-  # gateway IP (via `extra_hosts: host-gateway` in compose/core.yml).
+  # binds on the docker0 bridge gateway IP (default 172.17.0.1, set up
+  # automatically by Docker). Prometheus reaches it via
+  # `host.docker.internal`, which the docker daemon maps to the same
+  # docker0 IP (via `extra_hosts: host.docker.internal:host-gateway`
+  # in compose/core.yml).
   #
   # The exporter is optional — if you do not stack probes.yml, this scrape
   # will fail with connection refused and the job will be DOWN. That is

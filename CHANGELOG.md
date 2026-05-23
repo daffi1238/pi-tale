@@ -51,12 +51,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SYS_PTRACE`, `DAC_READ_SEARCH`. `/dev/kmsg` is still passed
   explicitly. Significantly reduces blast radius (privileged grants
   ALL caps and lifts seccomp).
-- **wifi_exporter listener off the LAN.** The `pitale` bridge now has
-  a static IPAM block (172.31.0.0/24, gateway 172.31.0.1). The
-  `network_mode: host` exporter binds on that gateway IP by default
-  instead of 0.0.0.0, so the metrics endpoint is only reachable from
-  the docker bridge — not from any LAN host. Prometheus inside the
-  bridge keeps reaching it via `host.docker.internal:9116`.
+- **wifi_exporter listener off the LAN.** The `network_mode: host`
+  exporter now binds on `172.17.0.1` (Docker's `docker0` gateway,
+  which is what `host-gateway` resolves to from inside the pitale
+  bridge) instead of 0.0.0.0. The metrics endpoint is only reachable
+  from docker bridges — not from any LAN host. Prometheus keeps
+  reaching it via `host.docker.internal:9116`. (An earlier draft
+  routed this through a static IPAM on the pitale bridge — that was
+  wrong: Docker resolves `host-gateway` to docker0, not to the
+  bridge a container is joined to.)
 - **CI tracks the post-baseline layout.** `amtool` validates the
   rendered template (the committed source is `alertmanager.yml.tmpl`),
   the compose job validates `wireguard.yml` and `tls.yml` standalone,
