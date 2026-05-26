@@ -1,157 +1,223 @@
 # VPS-side monitoring for pi-tale
 
-This folder is the VPS half of pi-tale's monitoring setup. It runs four
-Prometheus exporters and Promtail behind a WireGuard tunnel so nothing
-about your VPS's internals is exposed to the public internet.
+This folder is the VPS half of pi-tale's monitoring. Drop these
+exporters on any VPS that already peers with the Pi over WireGuard and
+its host + container metrics start flowing into Prometheus/Grafana on
+the Pi.
 
 ```
-  Internet ┐
-           │  HTTPS to your apps (unchanged)
-           ▼
-   ┌──────────────── VPS ────────────────┐                ┌──── Pi (pi-tale) ────┐
-   │                                     │   WireGuard    │                       │
-   │  apps (TwinTongues, WP, Postgres)   │ ───────────►   │   Prometheus  Loki    │
-   │  + node_exporter, cAdvisor, nginx,  │  10.50.0.0/24  │   Grafana, Alertmgr   │
-   │    postgres exporter, Promtail      │  (encrypted)   │   Telegram alerts     │
-   └─────────────────────────────────────┘                └───────────────────────┘
+   ┌──────────── VPS ────────────┐                ┌──── Pi (pi-tale) ────┐
+   │  your apps (nginx, …)       │                │                       │
+   │                             │  WireGuard     │   Prometheus  Loki    │
+   │  node_exporter   :9100      │ ─── scrape ──► │   Grafana, Alertmgr   │
+   │  cAdvisor        :9080      │  10.0.0.0/24   │                       │
+   │  (nginx_exporter :9113)     │  (encrypted)   │                       │
+   │  (postgres_expo  :9187)     │                │                       │
+   └─────────────────────────────┘                └───────────────────────┘
 ```
 
-Total VPS overhead: ~150 MB RAM, negligible CPU. All listeners bind to
-the WG overlay only — `0.0.0.0:9100/9080/9113/9187` are NOT exposed.
+Total overhead on the VPS: ~150 MB RAM, negligible CPU. All listeners
+bind to the WireGuard overlay only — public-facing ports stay
+unaffected.
 
-## 1. Bring up the WireGuard tunnel
+> The recommended first pass deploys just **node_exporter + cAdvisor**.
+> Add `nginx_exporter`/`postgres_exporter` later when you actually need
+> per-app metrics (they require touching production nginx/Postgres).
 
-On the **VPS**, configure WireGuard (any standard `wg-quick` setup
-works) and register the Pi gateway's public key as a `[Peer]`. The Pi
-side is a client — no public IP needed.
+## Prerequisites
 
-On the **Pi**, drop a fully-formed `wg0.conf` at
-`data/wireguard/wg0.conf` (mode 0600, root-owned). See
-`data/wireguard/wg0.conf.example` for the expected shape — at minimum
-you set the Pi's private key, the VPS public key, the VPS endpoint, and
-`AllowedIPs` restricted to the overlay (e.g. `10.50.0.0/24`). Make
-sure `WG_PI_IP` and `WG_VPS_IP` in `compose/.env` match what the conf
-assigns and what you want to scrape on the VPS — the gateway's DNAT
-rules use them.
+- WireGuard tunnel already up between the Pi gateway and the VPS.
+  - Default overlay: Pi = `10.0.0.125/24`, VPS = `10.0.0.1/24`.
+  - Verify the handshake **on the Pi**:
+    ```bash
+    docker exec pitale-wireguard-gateway wg show wg0
+    ```
+    Look for `latest handshake: <Xs ago>` with `X < 60` and non-zero
+    transfer in both directions.
+- Docker + Docker Compose v2 on the VPS.
 
-Then start the gateway and verify the handshake:
+If you haven't built the tunnel yet, see
+[`bootstrap/wireguard-setup.sh`](../../bootstrap/wireguard-setup.sh) on
+the Pi side and any `wg-quick` tutorial on the VPS side.
+
+## 1. Get this folder onto the VPS
+
+Use a **sparse clone** so the VPS only fetches what it needs from the
+public pi-tale repo:
 
 ```bash
-make wireguard
-make wireguard-status
+git clone --filter=blob:none --sparse https://github.com/daffi1238/pi-tale.git
+cd pi-tale
+git sparse-checkout set examples/vps-monitoring
+cd examples/vps-monitoring
 ```
 
-## 2. Deploy the exporters on the VPS
+Updates later: `git pull && docker compose up -d`.
+
+## 2. Confirm the VPS overlay IP
+
+The exporters bind on the VPS's own WireGuard IP. Confirm it:
 
 ```bash
-# Copy this whole folder to the VPS, e.g.
-scp -r examples/vps-monitoring/ vps:/opt/pitale-vps-monitoring/
-ssh vps
+ip -br addr show wg0
+# wg0   UNKNOWN   10.0.0.1/24      ← this is your WG_VPS_IP
+```
 
-cd /opt/pitale-vps-monitoring
-cp .env.example .env
-nano .env                       # edit POSTGRES_EXPORTER_DSN at minimum
+The shipped `.env` already sets `WG_VPS_IP=10.0.0.1`. If your IP is
+something else, override it without modifying the tracked file:
 
-docker compose --env-file .env up -d
+```bash
+echo 'WG_VPS_IP=10.0.0.X' > .env.local
+# docker compose reads .env.local automatically when present
+```
+
+## 3. Open the firewall **inbound on wg0**
+
+Even though the exporters bind only on `10.0.0.1`, most VPS hosts run a
+default-deny firewall that will drop the scrape requests before they
+reach the exporter. Add an explicit ALLOW for the overlay:
+
+```bash
+# ufw
+sudo ufw allow in on wg0 to any port 9100 proto tcp
+sudo ufw allow in on wg0 to any port 9080 proto tcp
+sudo ufw reload
+
+# iptables (persist with iptables-persistent)
+sudo iptables -I INPUT -i wg0 -p tcp --dport 9100 -j ACCEPT
+sudo iptables -I INPUT -i wg0 -p tcp --dport 9080 -j ACCEPT
+
+# nftables
+sudo nft insert rule inet filter input iifname "wg0" tcp dport {9100, 9080} accept
+```
+
+Public-side rules stay unchanged — the WG bind + this ACCEPT keep the
+exporters reachable only from inside the tunnel.
+
+## 4. Bring up node_exporter + cAdvisor
+
+```bash
+docker compose up -d node_exporter cadvisor
 docker compose ps
 ```
 
-You should see five containers running: `pitale-vps-node-exporter`,
-`pitale-vps-cadvisor`, `pitale-vps-nginx-exporter`,
-`pitale-vps-postgres-exporter`, `pitale-vps-promtail`.
-
-From the **Pi**, verify each is scrapeable over WG:
+The other services (`nginx_exporter`, `postgres_exporter`, `promtail`)
+stay defined in the YAML but unstarted; ignore the harmless
+`POSTGRES_EXPORTER_DSN variable not set` warning, or silence it with:
 
 ```bash
-curl -s http://10.50.0.2:9100/metrics  | head     # node
-curl -s http://10.50.0.2:9080/metrics  | head     # cadvisor
-curl -s http://10.50.0.2:9113/metrics  | head     # nginx
-curl -s http://10.50.0.2:9187/metrics  | head     # postgres
+echo 'POSTGRES_EXPORTER_DSN=' >> .env.local
 ```
 
-## 3. Pre-flight on the VPS
-
-### nginx stub_status
-
-`nginx_exporter` needs nginx's `stub_status` endpoint enabled. Drop
-`nginx-stub-status.conf` from this folder into
-`/etc/nginx/conf.d/stub_status.conf` and reload:
+## 5. Verify (on the VPS)
 
 ```bash
-sudo cp nginx-stub-status.conf /etc/nginx/conf.d/stub_status.conf
-sudo nginx -t && sudo systemctl reload nginx
-curl http://127.0.0.1/stub_status   # sanity check
+# Listeners bind on the WG IP only, not 0.0.0.0
+ss -lntp | grep -E '9100|9080'
+
+# Local metrics endpoints respond
+curl -s http://10.0.0.1:9100/metrics | head -3
+curl -s http://10.0.0.1:9080/metrics | head -3
+
+# Public IP must NOT serve the metrics
+curl -s -m 3 http://<public-ip>:9100/metrics   # expect: refused / timeout
 ```
 
-The block listens on `127.0.0.1:80` only. The exporter talks to it via
-`host.docker.internal` from inside its container.
-
-### Postgres read-only user
-
-Connect to Postgres as a superuser and create a monitoring role:
-
-```sql
-CREATE USER pg_monitor WITH PASSWORD 'CHANGE_ME_LONG_RANDOM';
--- pg_monitor is a built-in role since Postgres 10 that grants
--- read access to pg_stat_* views without GRANTing on real tables.
-GRANT pg_monitor TO pg_monitor;
-```
-
-Then put the credentials in the VPS's `.env`:
-
-```
-POSTGRES_EXPORTER_DSN=postgresql://pg_monitor:THE_PASSWORD@host.docker.internal:5432/postgres?sslmode=disable
-```
-
-If your Postgres listens on a non-default host/port, adjust accordingly.
-If Postgres is itself in a Docker container, use the container hostname
-or the docker bridge IP instead of `host.docker.internal`.
-
-### Promtail → Loki
-
-Promtail pushes to `http://10.50.0.1:3100/loki/api/v1/push` (the Pi over
-WG). The Pi's Loki container already publishes `:3100` on `0.0.0.0`, so
-no Pi-side change is needed; just make sure the tunnel is up.
-
-To confirm logs are arriving, on the Pi:
+## 6. Verify (on the Pi)
 
 ```bash
-curl -s 'http://localhost:3100/loki/api/v1/labels' | jq
-# Should include `host` in the labels list, with values pi-tale-node AND vps.
+curl -sG http://localhost:9090/api/v1/query \
+  --data-urlencode 'query=up{job=~"vps_node|vps_cadvisor"}' \
+  | python3 -m json.tool
+# both jobs should report up = "1"
 ```
 
-## 4. Activate the scrapes on the Pi
+Or open Prometheus at `http://<pi>:9090/targets` and check the
+`vps_node` + `vps_cadvisor` rows.
 
-The target files at `prometheus/targets/vps-*-main.yml` already have
-`10.50.0.2:<port>` in them, so a Prometheus reload is enough:
+When `up=1` for both, the `VpsNodeDown` alert (if it was firing)
+resolves itself in ≤3 min and Telegram sends a `[RESOLVED]`.
 
-```bash
-make reload-prometheus
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `cannot assign requested address` on container start | `WG_VPS_IP` ≠ actual `wg0` IP on the VPS | Run `ip -br addr show wg0`, set the real IP in `.env.local` |
+| Containers up, local curl OK, but `up=0` on the Pi | VPS firewall dropping inbound from `wg0` | Add the ACCEPT rules from step 3 |
+| `wg show` peers count 0 received bytes | Tunnel not actually established | Check VPS-side wg config + `[Peer]` pubkeys |
+| cAdvisor reports `(unhealthy)` | Embedded healthcheck targets port 8080 but we run on 9080 | Add an override (see below) |
+| `WARN POSTGRES_EXPORTER_DSN not set` | Compose evaluates all services even when unused | Cosmetic — `echo 'POSTGRES_EXPORTER_DSN=' >> .env.local` |
+
+### cAdvisor healthcheck override
+
+The shipped cAdvisor image embeds a healthcheck pointing at its default
+port `8080`. Because we run it on `9080`, the healthcheck always fails
+while the service actually works. To fix the cosmetic
+`(unhealthy)` state, add to `docker-compose.override.yml`:
+
+```yaml
+services:
+  cadvisor:
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:9080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 ```
 
-In Prometheus's `/targets` page you should now see `vps_node`,
-`vps_cadvisor`, `vps_nginx`, `vps_postgres` and `wireguard_exporter` all
-green.
+`docker-compose.override.yml` is gitignored, so each VPS can ship its
+own tweaks without touching the tracked compose file.
 
-## 5. Firewall hardening (recommended)
+## Adding nginx_exporter / postgres_exporter (second pass)
 
-Even though the exporters bind to the WG interface, set explicit drops
-on the public interface so a misconfiguration can't accidentally expose
-them:
+Both are kept in `docker-compose.yml` but require pre-flight work on the
+VPS — that's why they're not in the default first pass.
+
+### nginx
+
+1. Enable `stub_status` in your nginx:
+   ```bash
+   sudo cp nginx-stub-status.conf /etc/nginx/conf.d/stub_status.conf
+   sudo nginx -t && sudo systemctl reload nginx
+   curl http://127.0.0.1/stub_status   # sanity check
+   ```
+2. Open the WG firewall for `9113` (same pattern as step 3).
+3. `docker compose up -d nginx_exporter`.
+
+### postgres
+
+1. Create a read-only user:
+   ```sql
+   CREATE USER pg_monitor WITH PASSWORD 'CHANGE_ME_LONG_RANDOM';
+   GRANT pg_monitor TO pg_monitor;   -- pg_monitor is a built-in role since PG 10
+   ```
+2. Put the DSN in `.env.local` (NEVER in `.env` — `.env` is tracked):
+   ```
+   POSTGRES_EXPORTER_DSN=postgresql://pg_monitor:THE_PASSWORD@host.docker.internal:5432/postgres?sslmode=disable
+   ```
+3. Open the WG firewall for `9187`.
+4. `docker compose up -d postgres_exporter`.
+
+### Logs to Loki (promtail)
+
+Promtail pushes to `http://10.0.0.125:3100/loki/api/v1/push` (the Pi).
+The Pi gateway already DNATs `wg0:3100` to Loki, so no Pi-side change is
+needed. Bring it up with `docker compose up -d promtail`. Confirm logs
+arrive on the Pi:
 
 ```bash
-# Allow WireGuard in
-sudo ufw allow 51820/udp
-# Implicit deny on everything else (assuming ufw default is deny)
-sudo ufw status verbose
+curl -s 'http://localhost:3100/loki/api/v1/labels' | jq '.data'
+# should include "host" with values including "vps"
 ```
 
 ## Files
 
 ```
-docker-compose.yml          all five containers
-.env.example                template — copy to .env
+docker-compose.yml          all exporters defined; start them à la carte
+.env                        tracked: WG_VPS_IP only (non-sensitive)
+.env.local                  gitignored: per-VPS overrides + secrets
+.env.example                template kept for reference
 promtail-config.yml         log shipping to Loki on the Pi
-nginx-stub-status.conf      enables /stub_status on localhost
+nginx-stub-status.conf      snippet to enable /stub_status on the VPS
 README.md                   this file
 ```

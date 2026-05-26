@@ -147,6 +147,25 @@ A deeper write-up lives in [`docs/architecture.md`](docs/architecture.md).
 Adding UniFi metrics, SNMP devices and WiFi RF sondas is done by enabling
 the corresponding compose layer; see the docs.
 
+## Monitoring a remote VPS
+
+pi-tale can scrape host and container metrics from any VPS that joins
+its WireGuard overlay — useful when you run apps on a public-internet
+server but want their resource usage shown next to the rest of your
+infrastructure. Nothing about the VPS internals is exposed publicly:
+the exporters bind only on the WireGuard interface.
+
+```
+   ┌──────── VPS ────────┐                  ┌──── Pi (pi-tale) ────┐
+   │ apps + node_exp +   │ ─── WireGuard ── │  Prometheus  Loki    │
+   │ cAdvisor (+ nginx,  │   10.0.0.0/24    │  Grafana, Alertmgr   │
+   │ postgres exporters) │   (encrypted)    │                       │
+   └─────────────────────┘                  └───────────────────────┘
+```
+
+Full walkthrough (sparse clone, firewall, first-pass + opt-in
+exporters, troubleshooting): [`examples/vps-monitoring/README.md`](examples/vps-monitoring/README.md).
+
 ## Optional: Uptime Kuma UI
 
 If you (or whoever else has to look at this dashboard) want a friendlier
