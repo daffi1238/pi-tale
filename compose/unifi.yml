@@ -37,7 +37,11 @@ networks:
 services:
 
   mongo:
-    image: mongo:4.4
+    # PIN to 4.4.18. The :4.4 tag now points to 4.4.19+, which requires
+    # ARMv8.2-A — Cortex-A72 (Pi 4) is ARMv8-A and crashes with
+    # "Illegal instruction" on start. See
+    # https://github.com/docker-library/mongo/issues/485#issuecomment-970864306
+    image: mongo:4.4.18
     container_name: pitale-unifi-mongo
     hostname: mongo
     restart: unless-stopped
@@ -120,7 +124,10 @@ services:
       start_period: 120s
 
   unifi_poller:
-    image: ghcr.io/unpoller/unpoller:v2.12.4
+    # The project is "unpoller" but the image is still published under
+    # the historical `golift/unifi-poller` name on Docker Hub. The
+    # ghcr.io/unpoller/* registry only carries a deprecated v2 line.
+    image: golift/unifi-poller:v3.2.0
     container_name: pitale-unifi-poller
     hostname: unifi_poller
     restart: unless-stopped
