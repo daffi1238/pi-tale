@@ -1,12 +1,31 @@
-# pi-tale — UniFi layer (stub).
+# pi-tale — UniFi Network layer.
 #
-# Will add:
-#   - linuxserver/unifi-network-application (or jacobalberty/unifi)
-#   - golift/unifi-poller scraping the controller and exposing /metrics
+# Three containers, all on the shared `pitale` bridge network:
+#
+#   - mongo                       MongoDB 4.4 — Unifi controller's DB.
+#                                 Last arm64-published major. Auth on.
+#   - unifi-network-application   LinuxServer build of the Network app.
+#                                 Holds sites, devices, SSIDs, port
+#                                 profiles. UI on :8443.
+#   - unifi-poller                golift's scraper. Talks to the
+#                                 controller's API and exposes
+#                                 /metrics on :9130 for Prometheus.
 #
 # Separate compose project — bring it up alongside core, not stacked:
+#
 #   make unifi
 #   # or:  docker compose -f compose/unifi.yml --env-file compose/.env up -d
+#
+# Why bridge networking (not host) when the LinuxServer docs suggest
+# host: tunable port exposure. We keep the UI (8443) on localhost only
+# and only expose inform (8080) + STUN (3478/udp) on the LAN. UniFi
+# itself listens on 0.0.0.0 inside its netns, so any port that is NOT
+# published below is unreachable from outside the bridge.
+#
+# Trade-off: L2 device discovery (10001/udp broadcast) does NOT cross
+# the bridge, so net-new APs won't auto-show as "Pending Adoption".
+# That is fine for the documented migration path (set-inform from the
+# old controller or by SSH) — see docs/targets/unifi.md.
 
 name: pi-tale-unifi
 
@@ -15,4 +34,122 @@ networks:
     name: pitale
     external: true
 
-services: {}
+services:
+
+  mongo:
+    image: mongo:4.4
+    container_name: pitale-unifi-mongo
+    hostname: mongo
+    restart: unless-stopped
+    environment:
+      # Root credentials guard the admin DB. Created on first init.
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASS:?MONGO_ROOT_PASS not set — fill compose/.env}
+      # Used by the init script below to create the per-app user.
+      UNIFI_DB_USER: ${UNIFI_DB_USER:-unifi}
+      UNIFI_DB_PASS: ${UNIFI_DB_PASS:?UNIFI_DB_PASS not set — fill compose/.env}
+      UNIFI_DB_NAME: ${UNIFI_DB_NAME:-unifi}
+    volumes:
+      - ${DATA_DIR:-../data}/unifi/db:/data/db
+      # Runs ONLY on first init (when /data/db is empty). Creates a
+      # per-app user with dbOwner on the unifi + unifi_stat databases,
+      # which is what unifi-network-application expects to authenticate
+      # against. See unifi/mongo-init.sh.
+      - ../unifi/mongo-init.sh:/docker-entrypoint-initdb.d/init-mongo.sh:ro
+    networks: [pitale]
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  unifi:
+    image: lscr.io/linuxserver/unifi-network-application:8.5.6
+    container_name: pitale-unifi
+    hostname: unifi
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: ${TZ:-Etc/UTC}
+      # Connect to the mongo service on the same bridge.
+      MONGO_HOST: mongo
+      MONGO_PORT: "27017"
+      MONGO_USER: ${UNIFI_DB_USER:-unifi}
+      MONGO_PASS: ${UNIFI_DB_PASS}
+      MONGO_DBNAME: ${UNIFI_DB_NAME:-unifi}
+      # Stats DB name (UniFi convention: same prefix + `_stat`).
+      MONGO_AUTHSOURCE: ${UNIFI_DB_NAME:-unifi}
+      # Cap JVM heap so the container respects the mem_limit below
+      # without the JVM dying with "OOMKilled" on first GC pressure.
+      MEM_LIMIT: "768"
+      MEM_STARTUP: "256"
+    volumes:
+      - ${DATA_DIR:-../data}/unifi/app:/config
+    ports:
+      # UI: HTTPS to the controller. Bind to BIND_HOST_UI (default
+      # 127.0.0.1) so the cert-warning UI is reachable only via SSH
+      # tunnel. Set BIND_HOST_UI=0.0.0.0 to expose to the LAN.
+      - "${BIND_HOST_UI:-127.0.0.1}:8443:8443"
+      # Device inform endpoint. APs/switches POST telemetry here.
+      # MUST be reachable from the LAN where the devices live.
+      - "${BIND_HOST:-0.0.0.0}:8080:8080"
+      # STUN — punches a hole for WebRTC-style speedtest sessions
+      # between the controller and devices. Same reachability needs.
+      - "${BIND_HOST:-0.0.0.0}:3478:3478/udp"
+    networks: [pitale]
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    healthcheck:
+      # The controller takes 30-60s to initialise on first start (Java +
+      # Mongo schema). 8443 returns 200 once it's serving.
+      test: ["CMD", "curl", "-fks", "https://127.0.0.1:8443/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  unifi_poller:
+    image: ghcr.io/unpoller/unpoller:v2.12.4
+    container_name: pitale-unifi-poller
+    hostname: unifi_poller
+    restart: unless-stopped
+    depends_on:
+      unifi:
+        condition: service_healthy
+    environment:
+      # See https://unpoller.com/docs/install/configuration for the full
+      # env-var surface. We default to a single site ("default") and the
+      # built-in Prometheus output on :9130.
+      UP_UNIFI_DEFAULT_URL: https://unifi:8443
+      UP_UNIFI_DEFAULT_USER: ${UNIFI_POLLER_USER:?UNIFI_POLLER_USER not set — see docs/targets/unifi.md step 4}
+      UP_UNIFI_DEFAULT_PASS: ${UNIFI_POLLER_PASS:?UNIFI_POLLER_PASS not set — see docs/targets/unifi.md step 4}
+      # Skip TLS verify — the controller serves its self-signed cert.
+      UP_UNIFI_DEFAULT_VERIFY_SSL: "false"
+      UP_UNIFI_DEFAULT_SAVE_DPI: "false"
+      UP_UNIFI_DEFAULT_SAVE_IDS: "false"
+      UP_PROMETHEUS_DISABLE: "false"
+      UP_PROMETHEUS_HTTP_LISTEN: "0.0.0.0:9130"
+      UP_INFLUXDB_DISABLE: "true"
+      UP_LOKI_DISABLE: "true"
+    networks: [pitale]
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:9130/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

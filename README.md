@@ -85,7 +85,7 @@ project name):
 ```bash
 make probes    # WiFi RF exporter
 make extras    # Uptime Kuma
-make unifi     # UniFi controller + poller (stub for now)
+make unifi     # UniFi Network controller + mongo + poller (see docs/targets/unifi.md)
 make all       # core + probes + extras in one go
 ```
 

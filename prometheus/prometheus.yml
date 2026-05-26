@@ -204,6 +204,19 @@ scrape_configs:
         labels:
           host: pi-tale-node
 
+  # --- UniFi via unifi-poller (compose/unifi.yml) -------------------------
+  #
+  # unifi-poller (golift/unpoller) reads the controller API every 30s
+  # and exposes per-device, per-client and per-site gauges on :9130.
+  # The poller container lives on the `pitale` network alongside
+  # Prometheus, so it is reachable by hostname. If you have not run
+  # `make unifi`, this job will be DOWN — same idle pattern as
+  # wifi_exporter above.
+
+  - job_name: unifi_poller
+    static_configs:
+      - targets: ["unifi_poller:9130"]
+
   - job_name: blackbox_tcp
     metrics_path: /probe
     params:

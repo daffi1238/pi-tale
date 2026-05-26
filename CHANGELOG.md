@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Self-hosted UniFi Network controller** (`compose/unifi.yml` —
+  previously a stub). Three services on the `pitale` bridge: `mongo`
+  (4.4, last arm64-published major), `unifi` (LinuxServer's
+  unifi-network-application 8.5.6, JVM heap pinned to 768 M against a
+  1 G `mem_limit` cap), and `unifi_poller` (golift/unpoller 2.12.4,
+  scrapes the controller API and exposes `/metrics` on :9130 for
+  Prometheus). UI bound to `127.0.0.1:8443` by default — reach it
+  with `ssh -L 8443:localhost:8443 pi`. Inform (8080) and STUN
+  (3478/udp) follow `BIND_HOST` because devices on the LAN need them.
+  Mongo gets an auth bootstrap via `unifi/mongo-init.sh` (one-shot,
+  creates the per-app dbOwner on first init). `prometheus.yml` gains
+  a `unifi_poller` static scrape; `prometheus/rules/unifi.yml` (new)
+  ships `UnifiPollerDown`, `UnifiControllerUnreachable`,
+  `UnifiDeviceDown` and `UnifiDeviceRestartLoop`. Full deploy +
+  migration walk-through (backup .unf → restore on Pi → override
+  inform URL) in `docs/targets/unifi.md`.
 - **Containerised dashboards for node_exporter and cAdvisor**
   (`grafana/dashboards/{node-exporter,cadvisor}.json`). Built from
   scratch using the existing pi-tale colour/threshold conventions so

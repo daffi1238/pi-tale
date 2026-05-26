@@ -73,7 +73,7 @@ probes: ## start probes stack (wifi_exporter — needs core to be up)
 extras: ## start extras stack (Uptime Kuma)
 	$(COMPOSE) $(extras_args) up -d
 
-unifi: ## start UniFi stack (stub — no services yet)
+unifi: ## start UniFi stack (Network controller + mongo + unifi-poller — see docs/targets/unifi.md)
 	$(COMPOSE) $(unifi_args) up -d
 
 wireguard: ## start the WireGuard gateway + exporter (needs data/wireguard/wg0.conf first)
@@ -82,7 +82,7 @@ wireguard: ## start the WireGuard gateway + exporter (needs data/wireguard/wg0.c
 tls: ## start Caddy HTTPS in front of Grafana (set TLS_HOSTNAME in compose/.env first)
 	$(COMPOSE) $(tls_args) up -d
 
-all: up probes extras ## start core + probes + extras (UniFi is stub-only)
+all: up probes extras ## start core + probes + extras (UniFi opt-in via `make unifi`)
 
 # `-` prefix: keep going if a stack isn't running.
 down: ## stop every pi-tale stack

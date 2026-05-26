@@ -1,0 +1,76 @@
+# Alerts for the self-hosted UniFi Network controller and its devices.
+# Metrics come from unifi-poller (compose/unifi.yml).
+#
+# unifi-poller publishes under the `unpoller_*` namespace. The series
+# we rely on here:
+#
+#   unpoller_device_info{site,name,model,type,...} — gauge=1 per
+#                                                    device the poller
+#                                                    currently sees.
+#   unpoller_device_uptime_seconds                  — uptime per
+#                                                     device. 0 / absent
+#                                                     == device offline.
+#   unpoller_poller_unifi_errors_total              — scrape errors
+#                                                     against the
+#                                                     controller API.
+
+groups:
+
+  - name: pi-tale-unifi-poller
+    interval: 30s
+    rules:
+
+      # The poller container is down. Either crashed, OOM'd, or never
+      # came up because the controller credentials in compose/.env are
+      # wrong. Without it, no UniFi metrics — but the controller and
+      # devices keep working.
+      - alert: UnifiPollerDown
+        expr: up{job="unifi_poller"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "unifi-poller is not scraping"
+          description: "No metrics from the UniFi poller for 5m. Check `docker logs pitale-unifi-poller` and the UNIFI_POLLER_* credentials in compose/.env."
+
+      # The poller is up but its calls to the controller are failing —
+      # usually wrong credentials, controller in startup, or the read-
+      # only user got disabled in the UI.
+      - alert: UnifiControllerUnreachable
+        expr: rate(unpoller_poller_unifi_errors_total[5m]) > 0.1
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "unifi-poller cannot reach the UniFi controller"
+          description: "Sustained errors against the controller API ({{ $value | printf \"%.2f\" }}/s). The poller's user may have been removed; verify in the UI under Settings → Admins."
+
+  - name: pi-tale-unifi-devices
+    interval: 1m
+    rules:
+
+      # Per-device drop-off. `unpoller_device_info` carries the friendly
+      # name; we alert when a known device has been missing from the
+      # last two scrapes (= ~1 min for a 30s scrape interval).
+      - alert: UnifiDeviceDown
+        expr: |
+          (max by (site, name, model, type) (unpoller_device_info) == 1)
+            unless on (site, name)
+          (max by (site, name) (unpoller_device_info offset 30s) == 1)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "UniFi device {{ $labels.name }} ({{ $labels.model }}) is offline"
+          description: "Device {{ $labels.name }} on site {{ $labels.site }} stopped reporting. Check power/PoE and `Settings → System Log` in the UniFi UI."
+
+      # Devices restarting on their own usually mean PoE flap, firmware
+      # crash loop, or an unstable upstream switch port.
+      - alert: UnifiDeviceRestartLoop
+        expr: changes(unpoller_device_uptime_seconds[30m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "UniFi device {{ $labels.name }} restarted {{ $value | printf \"%.0f\" }} times in 30m"
+          description: "Repeated restarts on {{ $labels.name }} ({{ $labels.model }}, site {{ $labels.site }}). Inspect PoE budget on the upstream switch and recent firmware events."
