@@ -13,6 +13,11 @@ compose/.env.local
 .env
 .env.local
 
+# Exception: examples/vps-monitoring/.env carries only the overlay IP
+# (RFC1918, non-sensitive). Secrets for that compose stay in a sibling
+# .env.local (still ignored by *.env.local above).
+!examples/vps-monitoring/.env
+
 # --- Python ----------------------------------------------------------------
 __pycache__/
 *.py[cod]
