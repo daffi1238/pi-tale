@@ -1,0 +1,59 @@
+# Alerts for the public websites probed by the blackbox_http job and for
+# the VPS cAdvisor scrape. Routes to Alertmanager by `severity` label, same
+# as the other rule files. Cert/site metrics come from blackbox targets in
+# prometheus/targets/blackbox-http-*.yml.
+#
+# NOTE: the sites sit behind Cloudflare, so probe_success and the TLS cert
+# reflect the Cloudflare edge, not the origin server.
+
+groups:
+
+  - name: pi-tale-web-tls
+    interval: 1m
+    rules:
+
+      # probe_ssl_earliest_cert_expiry is a unix timestamp. Warn while there
+      # is still time to renew (Let's Encrypt/Cloudflare auto-renew ~30d
+      # out, so <14d means renewal is actually failing).
+      - alert: CertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox_http"} - time()) / 86400 < 14
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "TLS cert for {{ $labels.instance }} expires in {{ $value | printf \"%.1f\" }} days"
+          description: "Certificate renewal appears to be failing. Check the origin/Cloudflare TLS settings for {{ $labels.instance }}."
+
+      - alert: CertExpiryCritical
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox_http"} - time()) / 86400 < 3
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "TLS cert for {{ $labels.instance }} expires in {{ $value | printf \"%.1f\" }} days"
+          description: "Under 3 days to expiry — imminent outage. Renew now."
+
+      - alert: PublicSiteDown
+        expr: probe_success{job="blackbox_http"} == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Probe failing for {{ $labels.instance }}"
+          description: "blackbox probe_success=0 for 10m (measured at the Cloudflare edge). HTTP {{ with printf \"probe_http_status_code{instance='%s'}\" $labels.instance }}{{ end }}. Check the site/origin."
+
+  - name: pi-tale-vps-cadvisor
+    interval: 1m
+    rules:
+
+      # Companion to VpsNodeDown (prometheus/rules/vps.yml), which only
+      # covers vps_node. cAdvisor down = no per-container metrics from the
+      # VPS.
+      - alert: VpsCadvisorDown
+        expr: up{job="vps_cadvisor"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "VPS cAdvisor unreachable"
+          description: "Prometheus has failed to scrape {{ $labels.instance }} (vps_cadvisor) for 3 minutes."

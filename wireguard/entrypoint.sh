@@ -17,11 +17,17 @@ VPS_TARGET_IP="${VPS_TARGET_IP:-10.50.0.2}"
 # files: each target uses the gateway as host, same port number.
 VPS_TARGET_PORTS="${VPS_TARGET_PORTS:-9100 9080 9113 9187}"
 
-# Inbound from VPS Promtail to Loki. Loki lives on the pitale bridge in
-# the core compose project; we resolve its name via Docker DNS rather
-# than hard-coding an IP.
-LOKI_HOST="${LOKI_HOST:-loki}"
-LOKI_PORT="${LOKI_PORT:-3100}"
+# Inbound forwards: services on the pitale bridge that overlay peers reach
+# via the gateway's wg0 address (10.0.0.125). Space-separated "host:port".
+# We resolve each name via Docker DNS rather than hard-coding an IP.
+#
+#   loki:3100    — VPS Alloy/Promtail pushes logs here (required).
+#   grafana:3000 — dashboards viewable from the VPN at 10.0.0.125:3000.
+#
+# SECURITY: each entry widens what a compromised VPS (or any overlay peer)
+# can reach on the Pi side. Keep this list minimal. Drop grafana:3000 to
+# reach Grafana only via SSH tunnel to localhost:3000.
+INBOUND_FORWARDS="${INBOUND_FORWARDS:-loki:3100 grafana:3000}"
 
 log()  { printf '[wg-gw] %s\n'   "$*"; }
 warn() { printf '[wg-gw] [!] %s\n' "$*" >&2; }
@@ -38,24 +44,38 @@ mkdir -p /etc/wireguard
 cp "${WG_CONF_SRC}" "${WG_CONF}"
 chmod 0600 "${WG_CONF}"
 
-# Wait for Loki DNS. Loki lives in a different compose project so
-# `depends_on` doesn't apply across projects; this loop is the equivalent.
-log "Waiting for ${LOKI_HOST} DNS to resolve..."
-LOKI_IP=""
-i=0
-while [ "${i}" -lt 30 ]; do
-  LOKI_IP="$(getent hosts "${LOKI_HOST}" 2>/dev/null | awk '{print $1; exit}')" || true
-  [ -n "${LOKI_IP}" ] && break
-  i=$((i + 1))
-  sleep 2
-done
+# ----------------------------------------------------------------------------
+# Resolve inbound-forward targets BEFORE wg-quick.
+# ----------------------------------------------------------------------------
+#
+# wg-quick applies the `DNS =` line from wg0.conf, which rewrites
+# /etc/resolv.conf and drops Docker's embedded resolver (127.0.0.11). After
+# that, service names like `loki` no longer resolve. So resolve every
+# INBOUND_FORWARDS host to an IP now, while Docker DNS is still in place, and
+# stash "port:ip" pairs for the rule-install pass further down.
+RESOLVED_FORWARDS=""
+for entry in ${INBOUND_FORWARDS}; do
+  svc_host="${entry%%:*}"
+  svc_port="${entry##*:}"
 
-if [ -z "${LOKI_IP}" ]; then
-  warn "${LOKI_HOST} did not resolve in 60s — inbound log forwarding disabled."
-  warn "Bring up the core stack ('make up') and restart this container."
-else
-  log "Resolved ${LOKI_HOST} → ${LOKI_IP}"
-fi
+  svc_ip=""
+  i=0
+  while [ "${i}" -lt 30 ]; do
+    svc_ip="$(getent hosts "${svc_host}" 2>/dev/null | awk '{print $1; exit}')" || true
+    [ -n "${svc_ip}" ] && break
+    i=$((i + 1))
+    sleep 2
+  done
+
+  if [ -z "${svc_ip}" ]; then
+    warn "${svc_host} did not resolve in 60s — inbound forward ${entry} disabled."
+    warn "Bring up the core stack ('make up') and restart this container."
+    continue
+  fi
+
+  log "Resolved ${svc_host} → ${svc_ip} (inbound ${WG_IFACE}:${svc_port})"
+  RESOLVED_FORWARDS="${RESOLVED_FORWARDS} ${svc_port}:${svc_ip}"
+done
 
 # Bring up the tunnel. wg-quick handles routes (it adds 10.50.0.0/24 dev wg0
 # automatically thanks to AllowedIPs).
@@ -87,19 +107,23 @@ iptables -A FORWARD -i "${WG_IFACE}" -o eth0 -s "${VPS_TARGET_IP}" -j ACCEPT
 # bridge IP, which the VPS has no route back to.
 iptables -t nat -A POSTROUTING -o "${WG_IFACE}" -d "${VPS_TARGET_IP}" -j MASQUERADE
 
-# --- INBOUND: VPS Promtail → Loki on the pitale bridge ---
+# --- INBOUND: overlay peers → services on the pitale bridge ---
 #
-# VPS Promtail dials http://10.50.0.1:${LOKI_PORT}/loki/api/v1/push. The
-# packet arrives on wg0 with dst=10.50.0.1 (the gateway). We DNAT it to
-# Loki's actual bridge IP and MASQUERADE on the way out so Loki sees a
+# A packet arrives on wg0 with dst=10.0.0.125 (the gateway) and the service
+# port. We DNAT it to the service's actual bridge IP (resolved above, before
+# wg-quick clobbered DNS) and MASQUERADE on the way out so the service sees a
 # valid bridge-local source.
-if [ -n "${LOKI_IP}" ]; then
-  iptables -t nat -A PREROUTING -i "${WG_IFACE}" -p tcp --dport "${LOKI_PORT}" \
-    -j DNAT --to-destination "${LOKI_IP}:${LOKI_PORT}"
-  iptables -A FORWARD -i "${WG_IFACE}" -o eth0 -d "${LOKI_IP}" -j ACCEPT
-  iptables -A FORWARD -i eth0 -o "${WG_IFACE}" -s "${LOKI_IP}" -j ACCEPT
-  iptables -t nat -A POSTROUTING -o eth0 -d "${LOKI_IP}" -j MASQUERADE
-fi
+for pair in ${RESOLVED_FORWARDS}; do
+  svc_port="${pair%%:*}"
+  svc_ip="${pair##*:}"
+
+  log "Inbound forward ${WG_IFACE}:${svc_port} → ${svc_ip}:${svc_port}"
+  iptables -t nat -A PREROUTING -i "${WG_IFACE}" -p tcp --dport "${svc_port}" \
+    -j DNAT --to-destination "${svc_ip}:${svc_port}"
+  iptables -A FORWARD -i "${WG_IFACE}" -o eth0 -d "${svc_ip}" -j ACCEPT
+  iptables -A FORWARD -i eth0 -o "${WG_IFACE}" -s "${svc_ip}" -j ACCEPT
+  iptables -t nat -A POSTROUTING -o eth0 -d "${svc_ip}" -j MASQUERADE
+done
 
 log "Ready. Current wg state:"
 wg show "${WG_IFACE}" || true

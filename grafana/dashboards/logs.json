@@ -1,0 +1,213 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Logs ingested into Loki. Local Pi logs (host=pi-tale) plus anything the VPS ships over WireGuard via Grafana Alloy (host=vps): nginx reverse proxy, sshd auth, and auditd file-access events. Panels are line-filter based so they work regardless of the exact Alloy label scheme.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 10,
+      "type": "row",
+      "title": "SSH / auth",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "SSH auth events (rate over 5m)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 1 },
+      "datasource": { "type": "loki", "uid": "pitale-loki" },
+      "targets": [
+        {
+          "refId": "FAILED",
+          "datasource": { "type": "loki", "uid": "pitale-loki" },
+          "expr": "sum(count_over_time({host=~\"$host\"} |~ \"sshd\" |~ \"Failed password\" [5m]))",
+          "legendFormat": "Failed password"
+        },
+        {
+          "refId": "INVALID",
+          "datasource": { "type": "loki", "uid": "pitale-loki" },
+          "expr": "sum(count_over_time({host=~\"$host\"} |~ \"sshd\" |~ \"Invalid user\" [5m]))",
+          "legendFormat": "Invalid user"
+        },
+        {
+          "refId": "ACCEPTED",
+          "datasource": { "type": "loki", "uid": "pitale-loki" },
+          "expr": "sum(count_over_time({host=~\"$host\"} |~ \"sshd\" |~ \"Accepted \" [5m]))",
+          "legendFormat": "Accepted login"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["sum", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 60, "showPoints": "never", "stacking": { "mode": "none" } },
+          "color": { "mode": "palette-classic" },
+          "mappings": []
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Accepted login" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "Failed password" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "Invalid user" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "type": "logs",
+      "title": "SSH auth log",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 9 },
+      "datasource": { "type": "loki", "uid": "pitale-loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "pitale-loki" },
+          "expr": "{host=~\"$host\"} |~ \"sshd\" |~ \"(Failed password|Invalid user|Accepted )\"",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "nginx (reverse proxy)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 3,
+      "type": "logs",
+      "title": "nginx access / error",
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "type": "loki", "uid": "pitale-loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "pitale-loki" },
+          "expr": "{host=~\"$host\"} |~ \"(?i)nginx\"",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "auditd (file access)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 4,
+      "type": "logs",
+      "title": "auditd — sensitive path access (by rule key)",
+      "description": "Filters auditd events by the -k keys defined in the VPS audit rules. Adjust the regex to match the keys you install on the VPS.",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 32 },
+      "datasource": { "type": "loki", "uid": "pitale-loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "pitale-loki" },
+          "expr": "{host=~\"$host\"} |~ \"key=\\\"($audit_key)\\\"\"",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["pi-tale", "logs", "loki", "ssh", "nginx", "auditd"],
+  "templating": {
+    "list": [
+      {
+        "name": "host",
+        "label": "Host",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "pitale-loki" },
+        "definition": "label_values(host)",
+        "query": { "label": "host", "stream": "", "type": 1 },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "options": [],
+        "hide": 0
+      },
+      {
+        "name": "audit_key",
+        "label": "Audit key",
+        "type": "custom",
+        "query": "uploads,nginx_conf,ssh_conf,ssh_keys,stack_env",
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "options": [
+          { "selected": true, "text": "All", "value": "$__all" },
+          { "selected": false, "text": "uploads", "value": "uploads" },
+          { "selected": false, "text": "nginx_conf", "value": "nginx_conf" },
+          { "selected": false, "text": "ssh_conf", "value": "ssh_conf" },
+          { "selected": false, "text": "ssh_keys", "value": "ssh_keys" },
+          { "selected": false, "text": "stack_env", "value": "stack_env" }
+        ],
+        "multi": true,
+        "includeAll": true,
+        "allValue": "uploads|nginx_conf|ssh_conf|ssh_keys|stack_env",
+        "hide": 0
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Logs — nginx / SSH / auditd",
+  "uid": "pitale-logs",
+  "version": 1,
+  "weekStart": ""
+}

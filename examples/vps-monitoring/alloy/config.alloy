@@ -1,0 +1,75 @@
+// pi-tale — VPS log shipper (Grafana Alloy).
+//
+// Ships to the Pi's Loki over WireGuard:
+//   (a) logs of every Docker container (via the docker socket)
+//   (b) the host sshd auth log (/var/log/auth.log)
+// Every stream carries host="vps" so the ingestor's dashboards and SSH
+// alert rules (which match host=~"vps.*") light up.
+//
+// Push target is 10.0.0.125:3100 — reachable because this container runs
+// with network_mode: host and the WireGuard tunnel (wg0) lives on the host.
+
+logging {
+  level  = "warn"
+  format = "logfmt"
+}
+
+// ---------------------------------------------------------------------------
+// Sink: the Pi's Loki, over the overlay. host="vps" tags every stream.
+// ---------------------------------------------------------------------------
+loki.write "pitale" {
+  endpoint {
+    url = "http://10.0.0.125:3100/loki/api/v1/push"
+  }
+  external_labels = {
+    host = "vps",
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (a) Docker container logs
+// ---------------------------------------------------------------------------
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Turn Docker meta into useful labels: container name + compose service.
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service_name"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.write.pitale.receiver]
+}
+
+// ---------------------------------------------------------------------------
+// (b) Host sshd auth log
+// ---------------------------------------------------------------------------
+local.file_match "authlog" {
+  path_targets = [{
+    __path__ = "/var/log/auth.log",
+    job      = "auth",
+  }]
+}
+
+loki.source.file "authlog" {
+  targets    = local.file_match.authlog.targets
+  forward_to = [loki.write.pitale.receiver]
+}

@@ -1,0 +1,41 @@
+# pi-tale — VPS log shipper (Grafana Alloy). Deploy on the VPS:
+#
+#   mkdir -p ~/observability-agent/alloy && cd ~/observability-agent/alloy
+#   # drop config.alloy + this file here, then:
+#   docker compose up -d
+#
+# Or merge the `alloy` service below into your existing observability-agent
+# compose (it is a standalone project here so it can be brought up on its own).
+#
+# Why host networking: the WireGuard tunnel (wg0) lives on the VPS host, so
+# host network is the simplest way for Alloy to reach the Pi at 10.0.0.125
+# over the overlay — same reason node_exporter/cadvisor use it.
+#
+# Why user: root: Alloy must read /var/log/auth.log (mode 640 syslog:adm) and
+# the docker socket (660 root:docker). Root is the least-friction option; to
+# tighten, drop `user` and add `group_add: [adm, docker]` instead.
+
+name: pitale-vps-logs
+
+services:
+  alloy:
+    image: grafana/alloy:v1.7.5
+    container_name: pitale-vps-alloy
+    restart: unless-stopped
+    user: root
+    network_mode: host
+    command:
+      - run
+      - --storage.path=/var/lib/alloy/data
+      # UI/metrics bound to loopback only — never public. Change to
+      # 10.0.0.1:12345 if you want to reach it from the overlay.
+      - --server.http.listen-addr=127.0.0.1:12345
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+
+volumes:
+  alloy_data:

@@ -142,6 +142,10 @@ services:
     volumes:
       - ../loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - ../data/loki:/loki
+      # Loki ruler rules (LogQL alerts -> Alertmanager). Mounted under the
+      # single-tenant path (auth_enabled:false -> tenant "fake") that the
+      # ruler's local store reads from (ruler.storage.local.directory).
+      - ../loki/rules:/loki/rules/fake:ro
     ports:
       - "${BIND_HOST:-0.0.0.0}:${LOKI_PORT:-3100}:3100"
     networks: [pitale]

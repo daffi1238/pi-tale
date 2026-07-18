@@ -56,8 +56,11 @@ services:
       VPS_TARGET_IP: ${WG_VPS_IP:-10.50.0.2}
       # Space-separated. Adjust if you change the VPS exporter ports.
       VPS_TARGET_PORTS: "9100 9080 9113 9187"
-      LOKI_HOST: loki
-      LOKI_PORT: "3100"
+      # Inbound "host:port" forwards reachable from the overlay via the
+      # gateway's wg0 address (10.0.0.125). loki:3100 = VPS log push;
+      # grafana:3000 = dashboards viewable from the VPN. Drop grafana:3000
+      # to keep Grafana reachable only via SSH tunnel to localhost:3000.
+      INBOUND_FORWARDS: "loki:3100 grafana:3000"
     volumes:
       # User-managed WireGuard config. Drop your own wg0.conf at
       # data/wireguard/wg0.conf (mode 0600, root-owned). The entrypoint

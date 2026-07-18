@@ -56,6 +56,21 @@ route:
       receiver: 'telegram'
       repeat_interval: 1h
 
+    # SSH accepted-login notice (info) → Telegram once, then quiet. A
+    # dedicated route so it is not dropped by the null default and does not
+    # inherit the noisier warning repeat below.
+    - matchers:
+        - alertname = SSHAcceptedLogin
+      receiver: 'telegram'
+      repeat_interval: 24h
+
+    # Warning → Telegram, slower repeat (cert expiry, site down, resource
+    # pressure). Placed after the specific routes above so they win.
+    - matchers:
+        - severity = warning
+      receiver: 'telegram'
+      repeat_interval: 12h
+
 inhibit_rules:
   # If we have lost the node, suppress per-probe alerts about that node.
   - source_matchers:

@@ -46,3 +46,12 @@
     kind: extranet
     owner: self
     module: http_2xx_title_twin_tongues
+
+# Generic http_2xx (no module label) — uptime + cert expiry only. Add a
+# `http_2xx_title_sanlucarsecreta` module + `module:` label here later if
+# you want body-content assertion.
+- targets:
+    - https://sanlucarsecreta.es
+  labels:
+    kind: extranet
+    owner: self

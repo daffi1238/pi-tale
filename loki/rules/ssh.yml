@@ -1,0 +1,33 @@
+# Loki ruler alerting rules (LogQL). Evaluated by Loki's ruler and pushed
+# to Alertmanager (see loki/loki-config.yml -> ruler.alertmanager_url).
+# Routes to Telegram by `severity` label, same as the Prometheus rules.
+#
+# These fire only once the VPS ships auth logs over WireGuard with a
+# host="vps*" label (Grafana Alloy -> Loki). Until then they stay inactive
+# (no matching streams = no data = no alert).
+
+groups:
+
+  - name: pi-tale-ssh
+    interval: 1m
+    rules:
+
+      - alert: SSHBruteForce
+        expr: |
+          sum by (host) (count_over_time({host=~"vps.*"} |~ `sshd` |~ `Failed password|Invalid user` [5m])) > 10
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Possible SSH brute force on {{ $labels.host }}"
+          description: "{{ $value | printf \"%.0f\" }} failed/invalid SSH logins in the last 5m."
+
+      - alert: SSHAcceptedLogin
+        expr: |
+          sum by (host) (count_over_time({host=~"vps.*"} |~ `sshd` |~ `Accepted ` [5m])) > 0
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: "SSH login accepted on {{ $labels.host }}"
+          description: "{{ $value | printf \"%.0f\" }} SSH session(s) accepted in the last 5m."

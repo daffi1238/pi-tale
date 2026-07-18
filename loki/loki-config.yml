@@ -51,7 +51,11 @@ compactor:
 
 limits_config:
   retention_period: 30d
-  reject_old_samples: true
+  # Backfill allowed: the VPS ships auditd/journald batches that may carry
+  # timestamps older than the default 1w window (e.g. after a WG outage or
+  # an Alloy restart replaying its WAL). Rejecting them would silently drop
+  # real events, so accept out-of-order/old samples.
+  reject_old_samples: false
   reject_old_samples_max_age: 168h
   max_query_series: 5000
 
