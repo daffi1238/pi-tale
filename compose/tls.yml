@@ -36,9 +36,14 @@ services:
       # mis-configured deployment still boots with Caddy's internal CA
       # instead of crashing on a missing host.
       TLS_HOSTNAME: ${TLS_HOSTNAME:-localhost}
-      # If empty, the Caddyfile falls back to `internal` (Caddy's local
-      # CA). Set to a real address only when TLS_HOSTNAME is public.
-      TLS_EMAIL: ${TLS_EMAIL:-}
+      # Null (not empty-string) mapping: Compose forwards TLS_EMAIL from
+      # the host env only when it is actually set, and omits it otherwise.
+      # Caddy treats an empty-but-set var as present, so `{$TLS_EMAIL:...}`
+      # defaults would NOT apply and the `email` directive would crash with
+      # no argument. Omitting the var lets the Caddyfile fall back to
+      # `internal` (Caddy's local CA). Set a real address only when
+      # TLS_HOSTNAME is public.
+      TLS_EMAIL:
     volumes:
       - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ../data/caddy/data:/data

@@ -22,3 +22,29 @@
   labels:
     kind: intranet
     subnet: "10.10.10"
+
+# UniFi access points. Static IPs reassigned 2026-07-16. Per-AP blocks so
+# each carries its own `name` label (labels apply to the whole block).
+# The UniFi poller already tracks these by MAC; these ICMP probes add
+# independent up/down + latency per AP.
+- targets:
+    - 192.168.1.110
+  labels:
+    kind: intranet
+    subnet: "192.168"
+    role: ap
+    name: AP-Entry
+- targets:
+    - 192.168.1.111
+  labels:
+    kind: intranet
+    subnet: "192.168"
+    role: ap
+    name: AP-Reception
+- targets:
+    - 192.168.1.112
+  labels:
+    kind: intranet
+    subnet: "192.168"
+    role: ap
+    name: AP-Backyard
