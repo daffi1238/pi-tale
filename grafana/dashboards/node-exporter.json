@@ -451,7 +451,7 @@
   "time": { "from": "now-3h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Pi-tale Host (node_exporter)",
+  "title": "Pi Host",
   "uid": "pitale-node-exporter",
   "version": 1,
   "weekStart": ""

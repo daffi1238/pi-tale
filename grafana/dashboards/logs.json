@@ -206,7 +206,7 @@
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
-  "title": "Logs — nginx / SSH / auditd",
+  "title": "VPS Logs — nginx / SSH / auditd",
   "uid": "pitale-logs",
   "version": 1,
   "weekStart": ""
